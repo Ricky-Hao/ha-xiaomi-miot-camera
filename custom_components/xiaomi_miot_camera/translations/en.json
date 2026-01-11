@@ -10,7 +10,7 @@
             },
             "auth": {
                 "title": "Xiaomi Account Login",
-                "description": "Please login to your Xiaomi account:\n\n**Step 1:** Open this URL in your browser:\n{auth_url}\n\n**Step 2:** Login with your Xiaomi account and authorize.\n\n**Step 3:** After authorization, you will see a success page. Set your Home Assistant callback URL in the input box:\n`{callback_url}`\n\n**Step 4:** Click 'Jump' button to complete authorization automatically.\n\n---\n\n*Alternative: If automatic callback doesn't work, you can manually copy the `code` and `state` values from the redirect page and enter them below.*",
+                "description": "Please login to your Xiaomi account:\n\nStep 1: Open this URL in your browser:\n{auth_url}\n\nStep 2: Login with your Xiaomi account and authorize.\n\nStep 3: After authorization, you will see a success page. Set your Home Assistant callback URL in the input box:\n{callback_url}\n\nStep 4: Click Jump button to complete authorization automatically.\n\nAlternative: If automatic callback does not work, you can manually copy the code and state values from the redirect page and enter them below.",
                 "data": {
                     "code": "Authorization Code (optional if auto-callback works)",
                     "state": "State (optional if auto-callback works)"
