@@ -337,30 +337,39 @@ async def create_camera_backend(
     # Check if we should use proxy
     use_proxy = force_proxy
 
-    if not use_proxy:
-        # Check if on musl (Alpine/HAOS)
-        if _is_musl_libc():
-            _LOGGER.info("Detected musl libc (Alpine/HAOS), will use proxy backend")
-            use_proxy = True
+    # First check if on musl (Alpine/HAOS)
+    if not use_proxy and _is_musl_libc():
+        _LOGGER.info("Detected musl libc (Alpine/HAOS), will use proxy backend")
+        use_proxy = True
 
-    if not use_proxy:
-        # Try to load native library
-        try:
-            from .camera import _load_dynamic_lib
-            _load_dynamic_lib()
-            _LOGGER.info("Native library available, using native backend")
-            return NativeCameraBackend(loop=loop)
-        except Exception as e:
-            _LOGGER.warning("Native library not available: %s", e)
-            use_proxy = True
+    # If proxy is available, prefer it (especially on HAOS)
+    proxy_available = await _is_proxy_available(proxy_url)
+    
+    if use_proxy or proxy_available:
+        if proxy_available:
+            _LOGGER.info("Using proxy backend at %s", proxy_url)
+            return ProxyCameraBackend(proxy_url=proxy_url, loop=loop)
+        else:
+            raise RuntimeError(
+                "Camera streaming not available. "
+                "On Home Assistant OS, please install and start the 'Xiaomi Camera Proxy' add-on. "
+                "Go to Settings → Add-ons → Add-on Store → Repositories → Add: "
+                "https://github.com/Ricky-Hao/ha-xiaomi-miot-camera"
+            )
 
-    # Use proxy backend
-    if await _is_proxy_available(proxy_url):
-        _LOGGER.info("Using proxy backend at %s", proxy_url)
-        return ProxyCameraBackend(proxy_url=proxy_url, loop=loop)
-    else:
+    # Try to load native library (only on glibc systems)
+    try:
+        from .camera import _load_dynamic_lib
+        _load_dynamic_lib()
+        _LOGGER.info("Native library available, using native backend")
+        return NativeCameraBackend(loop=loop)
+    except Exception as e:
+        _LOGGER.warning("Native library not available: %s", e)
+        # Check proxy again as fallback
+        if await _is_proxy_available(proxy_url):
+            _LOGGER.info("Falling back to proxy backend at %s", proxy_url)
+            return ProxyCameraBackend(proxy_url=proxy_url, loop=loop)
         raise RuntimeError(
-            "Camera streaming not available. "
-            "On Home Assistant OS, please install the 'Xiaomi Camera Proxy' add-on. "
-            "On other systems, ensure the native library is compatible."
+            f"Camera streaming not available. Native library error: {e}. "
+            "On Home Assistant OS, please install the 'Xiaomi Camera Proxy' add-on."
         )
