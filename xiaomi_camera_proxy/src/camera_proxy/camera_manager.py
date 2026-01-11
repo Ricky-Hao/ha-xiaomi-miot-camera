@@ -246,7 +246,18 @@ class CameraInstance:
         return self._manager.lib.miot_camera_status(self._c_instance)
 
     def _on_raw_data(self, header: _MIoTCameraFrameHeaderC, data: POINTER(c_uint8)):
-        """Handle raw data from camera."""
+        """Handle raw data from camera.
+        
+        MIoT Camera Codec IDs (from native library):
+        - VIDEO_H264 = 4
+        - VIDEO_HEVC/VIDEO_H265 = 5
+        - AUDIO_PCM = 1024
+        - AUDIO_G711U = 1026
+        - AUDIO_G711A = 1027
+        - AUDIO_OPUS = 1032
+        """
+        from .decoder import MIoTCameraCodec
+        
         try:
             frame_data = string_at(data, header.contents.length)
             timestamp = header.contents.timestamp
@@ -260,11 +271,21 @@ class CameraInstance:
                 self._did, codec_id, channel, frame_type, len(frame_data)
             )
 
-            # Detect actual format by data header (more reliable than codec_id)
-            is_h264_nal = len(frame_data) >= 4 and frame_data[:4] == b'\x00\x00\x00\x01'
+            # Check if video codec (H.264=4 or H.265=5)
+            is_video = codec_id in (MIoTCameraCodec.VIDEO_H264, MIoTCameraCodec.VIDEO_H265)
+            
+            # Check if audio codec
+            is_audio = codec_id in (
+                MIoTCameraCodec.AUDIO_PCM,
+                MIoTCameraCodec.AUDIO_G711U,
+                MIoTCameraCodec.AUDIO_G711A,
+                MIoTCameraCodec.AUDIO_OPUS
+            )
+            
+            # Also detect format by data header for fallback
             is_jpeg = len(frame_data) >= 2 and frame_data[:2] == b'\xff\xd8'
 
-            # JPEG data (MJPEG or already decoded)
+            # JPEG data (already decoded, just forward)
             if is_jpeg:
                 _LOGGER.debug(
                     "Valid JPEG frame: %d bytes, jpg_callbacks channels: %s",
@@ -276,14 +297,8 @@ class CameraInstance:
                         self._main_loop
                     )
 
-            # H.264/H.265 NAL unit (needs decoding)
-            elif is_h264_nal:
-                # Determine codec: check NAL type for H.264 vs H.265
-                # For now, assume H.264 (codec 27) if not specified
-                actual_codec = 27  # H.264 default
-                if codec_id == 173:
-                    actual_codec = 173  # H.265
-                
+            # Video frame (H.264/H.265 - needs decoding)
+            elif is_video:
                 # Raw video callbacks
                 for cb in self._raw_video_callbacks.get(channel, []):
                     asyncio.run_coroutine_threadsafe(
@@ -291,16 +306,15 @@ class CameraInstance:
                         self._main_loop
                     )
 
-                # Decode to JPG - try for all NAL frames, not just I-frames
-                # Some streams may not mark frame_type correctly
+                # Decode to JPG
                 _LOGGER.debug(
-                    "H.264 NAL frame: len=%d, frame_type=%d, decoding to JPG",
-                    len(frame_data), frame_type
+                    "Video frame: codec=%d, len=%d, frame_type=%d, decoding to JPG",
+                    codec_id, len(frame_data), frame_type
                 )
                 try:
-                    # Pass stream_id to maintain codec state per camera
+                    # Pass codec_id (4 or 5) directly to decoder
                     jpg_data = self._decoder.decode_to_jpg(
-                        frame_data, actual_codec, stream_id=f"{self._did}_{channel}"
+                        frame_data, codec_id, stream_id=f"{self._did}_{channel}"
                     )
                     if jpg_data:
                         _LOGGER.debug(
@@ -313,10 +327,10 @@ class CameraInstance:
                                 self._main_loop
                             )
                 except Exception as e:
-                    _LOGGER.debug("Failed to decode frame (may be P/B frame): %s", e)
+                    _LOGGER.debug("Failed to decode frame: %s", e)
 
-            # Audio frame (AAC/PCM)
-            elif codec_id in (86018, 65536):  # AAC=86018, PCM=65536
+            # Audio frame
+            elif is_audio:
                 for cb in self._raw_audio_callbacks.get(channel, []):
                     asyncio.run_coroutine_threadsafe(
                         cb(self._did, frame_data, timestamp, sequence, channel),

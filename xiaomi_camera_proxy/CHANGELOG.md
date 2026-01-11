@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.8] - 2026-01-12
+
+### Fixed
+- Use correct MIoT Camera codec IDs (VIDEO_H264=4, VIDEO_H265=5) matching native library
+- Use direct `Packet(data)` decoding instead of `parse()` (matching xiaomi-miloco reference)
+- Simplified decoder - let codec handle NAL parsing internally
+- Improved audio decoding with proper OPUS/G711 codec support
+
 ## [0.2.7] - 2026-01-12
 
 ### Fixed
