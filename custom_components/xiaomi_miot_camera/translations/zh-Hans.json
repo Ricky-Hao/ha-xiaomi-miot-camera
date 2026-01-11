@@ -1,0 +1,48 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "小米 MIoT 摄像头设置",
+                "description": "选择你的小米云服务器区域以开始设置。",
+                "data": {
+                    "cloud_server": "云服务器区域"
+                }
+            },
+            "auth": {
+                "title": "小米账号登录",
+                "description": "请登录你的小米账号：\n\n1. 在浏览器中打开此链接：\n{auth_url}\n\n2. 使用小米账号登录\n\n3. 授权后，你将被重定向到类似这样的地址：\n`https://my.home-assistant.io/redirect/oauth?code=xxx&state=yyy`\n\n4. 从 URL 中复制 `code` 和 `state` 的值，并在下方输入。",
+                "data": {
+                    "code": "授权码 (code)",
+                    "state": "状态码 (state)"
+                }
+            },
+            "cameras": {
+                "title": "选择摄像头",
+                "description": "发现 {camera_count} 个摄像头。选择你想要添加到 Home Assistant 的摄像头。",
+                "data": {
+                    "selected_cameras": "摄像头"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "无法连接到小米云服务",
+            "invalid_auth": "认证无效。请检查你的授权码和状态码。",
+            "unknown": "发生了意外错误"
+        },
+        "abort": {
+            "already_configured": "此账号已配置",
+            "no_cameras": "未在你的小米账号中找到摄像头"
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "小米 MIoT 摄像头选项",
+                "description": "配置你的小米 MIoT 摄像头集成。",
+                "data": {
+                    "selected_cameras": "已选摄像头"
+                }
+            }
+        }
+    }
+}

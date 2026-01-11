@@ -1,0 +1,48 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Xiaomi MIoT Camera Setup",
+                "description": "Select your Xiaomi cloud server region to begin setup.",
+                "data": {
+                    "cloud_server": "Cloud Server Region"
+                }
+            },
+            "auth": {
+                "title": "Xiaomi Account Login",
+                "description": "Please login to your Xiaomi account:\n\n1. Open this URL in your browser:\n{auth_url}\n\n2. Login with your Xiaomi account\n\n3. After authorization, you will be redirected to a URL like:\n`https://my.home-assistant.io/redirect/oauth?code=xxx&state=yyy`\n\n4. Copy the `code` and `state` values from the URL and enter them below.",
+                "data": {
+                    "code": "Authorization Code",
+                    "state": "State"
+                }
+            },
+            "cameras": {
+                "title": "Select Cameras",
+                "description": "Found {camera_count} camera(s). Select the cameras you want to add to Home Assistant.",
+                "data": {
+                    "selected_cameras": "Cameras"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "Failed to connect to Xiaomi cloud service",
+            "invalid_auth": "Invalid authentication. Please check your code and state values.",
+            "unknown": "An unexpected error occurred"
+        },
+        "abort": {
+            "already_configured": "This account is already configured",
+            "no_cameras": "No cameras found in your Xiaomi account"
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Xiaomi MIoT Camera Options",
+                "description": "Configure your Xiaomi MIoT Camera integration.",
+                "data": {
+                    "selected_cameras": "Selected Cameras"
+                }
+            }
+        }
+    }
+}
