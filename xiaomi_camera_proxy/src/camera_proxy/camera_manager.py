@@ -260,8 +260,23 @@ class CameraInstance:
                 self._did, codec_id, channel, frame_type, len(frame_data)
             )
 
+            # MJPEG (codec=5, 7, 8) - already JPEG, no decoding needed
+            if codec_id in (5, 7, 8):
+                _LOGGER.debug("MJPEG frame received, sending directly as JPG")
+                for cb in self._jpg_callbacks.get(channel, []):
+                    asyncio.run_coroutine_threadsafe(
+                        cb(self._did, frame_data, timestamp, channel),
+                        self._main_loop
+                    )
+                # Also send to raw video callbacks
+                for cb in self._raw_video_callbacks.get(channel, []):
+                    asyncio.run_coroutine_threadsafe(
+                        cb(self._did, frame_data, timestamp, sequence, channel),
+                        self._main_loop
+                    )
+
             # Video frame (H264/H265)
-            if codec_id in (27, 173):  # H264=27, H265=173
+            elif codec_id in (27, 173):  # H264=27, H265=173
                 # Raw video callbacks
                 for cb in self._raw_video_callbacks.get(channel, []):
                     asyncio.run_coroutine_threadsafe(
@@ -297,7 +312,8 @@ class CameraInstance:
                         self._main_loop
                     )
 
-                # TODO: Decode to PCM if needed
+            else:
+                _LOGGER.debug("Unknown codec_id: %d, ignoring frame", codec_id)
 
         except Exception as e:
             _LOGGER.exception("Error in raw data callback: %s", e)

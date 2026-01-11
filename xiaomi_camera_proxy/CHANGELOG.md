@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.4] - 2026-01-12
+
+### Fixed
+- Add support for MJPEG codec (codec_id=5) - frames are already JPEG, no decoding needed
+- This fixes cameras that output MJPEG instead of H264/H265
+
 ## [0.2.3] - 2026-01-12
 
 ### Added
