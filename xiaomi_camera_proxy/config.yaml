@@ -19,5 +19,4 @@ map:
 options:
   log_level: info
 schema:
-  log_level: str
-image: ghcr.io/ricky-hao/xiaomi-camera-proxy-{arch}
+  log_level: list(debug|info|warning|error)
