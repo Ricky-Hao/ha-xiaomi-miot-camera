@@ -1,7 +1,7 @@
 {
     "domain": "xiaomi_miot_camera",
     "name": "Xiaomi MIoT Camera",
-    "version": "0.1.5",
+    "version": "0.2.0",
     "codeowners": [
         "@Ricky-Hao"
     ],
@@ -17,9 +17,7 @@
         "aiofiles>=23.0.0",
         "pydantic>=2.0.0",
         "aiocache>=0.12.0",
-        "PyYAML>=6.0",
-        "av>=10.0.0",
-        "Pillow>=9.0.0"
+        "PyYAML>=6.0"
     ],
     "integration_type": "hub"
 }

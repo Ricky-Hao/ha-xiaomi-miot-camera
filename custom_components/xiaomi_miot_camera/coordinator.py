@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .miot.client import MIoTClient
-from .miot.camera_backend import CameraBackend, create_camera_backend, FORCE_PROXY_MODE
+from .miot.camera_backend import CameraBackend, create_camera_backend
 from .miot.types import MIoTOauthInfo, MIoTCameraInfo, MIoTCameraStatus
 
 from .const import (
@@ -123,10 +123,6 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
 
         _LOGGER.info("Initializing Xiaomi MIoT Camera coordinator")
 
-        # Check if we should use proxy mode (skip native camera client)
-        import os
-        skip_camera = FORCE_PROXY_MODE or os.environ.get("XIAOMI_CAMERA_FORCE_PROXY", "").lower() in ("1", "true", "yes")
-        
         # Create MIoT client
         self._client = MIoTClient(
             uuid=self._uuid,
@@ -136,10 +132,10 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
             loop=self.hass.loop,
         )
 
-        # Initialize client (skip camera if using proxy mode)
-        await self._client.init_async(skip_camera=skip_camera)
+        # Initialize client
+        await self._client.init_async()
 
-        # Create camera backend (auto-detects native vs proxy)
+        # Create camera backend (connects to proxy add-on)
         try:
             self._camera_backend = await create_camera_backend(
                 proxy_url=self._proxy_url,
