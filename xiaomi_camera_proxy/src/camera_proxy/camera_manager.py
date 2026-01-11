@@ -219,12 +219,14 @@ class CameraInstance:
 
         # Register raw data callback
         self._callback_refs["raw_data"] = _MIOT_CAMERA_ON_RAW_DATA(self._on_raw_data)
+        _LOGGER.info("Registering raw data callback for camera %s", self._did)
         self._manager.lib.miot_camera_register_raw_data(
             self._c_instance,
             self._callback_refs["raw_data"],
             0  # channel
         )
 
+        _LOGGER.info("Starting camera %s with qualities=%s", self._did, qualities)
         result = self._manager.lib.miot_camera_start(self._c_instance, byref(config))
         if result != 0:
             raise RuntimeError(f"Failed to start camera: {result}")
@@ -253,6 +255,11 @@ class CameraInstance:
             codec_id = header.contents.codec_id
             frame_type = header.contents.frame_type
 
+            _LOGGER.debug(
+                "Received raw frame: did=%s, codec=%d, channel=%d, type=%d, len=%d",
+                self._did, codec_id, channel, frame_type, len(frame_data)
+            )
+
             # Video frame (H264/H265)
             if codec_id in (27, 173):  # H264=27, H265=173
                 # Raw video callbacks
@@ -264,14 +271,21 @@ class CameraInstance:
 
                 # Decode to JPG if I-frame
                 if frame_type == 1:  # I-frame
+                    _LOGGER.debug("Decoding I-frame to JPG for camera %s", self._did)
                     try:
                         jpg_data = self._decoder.decode_to_jpg(frame_data, codec_id)
                         if jpg_data:
+                            _LOGGER.debug(
+                                "Decoded JPG: %d bytes, callbacks: %s",
+                                len(jpg_data), list(self._jpg_callbacks.keys())
+                            )
                             for cb in self._jpg_callbacks.get(channel, []):
                                 asyncio.run_coroutine_threadsafe(
                                     cb(self._did, jpg_data, timestamp, channel),
                                     self._main_loop
                                 )
+                        else:
+                            _LOGGER.warning("Decoder returned empty JPG data")
                     except Exception as e:
                         _LOGGER.warning("Failed to decode frame: %s", e)
 

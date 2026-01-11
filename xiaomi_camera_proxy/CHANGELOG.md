@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.3] - 2026-01-12
+
+### Added
+- Debug logging for frame reception and decoding to diagnose streaming issues
+
 ## [0.2.2] - 2026-01-11
 
 ### Fixed
