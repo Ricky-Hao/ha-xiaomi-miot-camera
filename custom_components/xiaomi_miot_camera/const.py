@@ -29,5 +29,9 @@ CLOUD_SERVERS: Final = {
     "us": "United States"
 }
 
-# OAuth2 redirect URI for Home Assistant
-OAUTH2_REDIRECT_URI: Final = "https://my.home-assistant.io/redirect/oauth"
+# OAuth2 redirect URI - uses Xiaomi's official redirect page
+# This page allows users to jump to their local HA instance with code/state
+OAUTH2_REDIRECT_URI: Final = "https://mico.api.mijia.tech/login_redirect"
+
+# OAuth callback path in Home Assistant
+OAUTH_CALLBACK_PATH: Final = "/api/xiaomi_miot_camera/callback"

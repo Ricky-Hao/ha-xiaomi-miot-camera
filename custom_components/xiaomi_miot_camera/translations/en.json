@@ -10,10 +10,10 @@
             },
             "auth": {
                 "title": "Xiaomi Account Login",
-                "description": "Please login to your Xiaomi account:\n\n1. Open this URL in your browser:\n{auth_url}\n\n2. Login with your Xiaomi account\n\n3. After authorization, you will be redirected to a URL like:\n`https://my.home-assistant.io/redirect/oauth?code=xxx&state=yyy`\n\n4. Copy the `code` and `state` values from the URL and enter them below.",
+                "description": "Please login to your Xiaomi account:\n\n**Step 1:** Open this URL in your browser:\n{auth_url}\n\n**Step 2:** Login with your Xiaomi account and authorize.\n\n**Step 3:** After authorization, you will see a success page. Set your Home Assistant callback URL in the input box:\n`{callback_url}`\n\n**Step 4:** Click 'Jump' button to complete authorization automatically.\n\n---\n\n*Alternative: If automatic callback doesn't work, you can manually copy the `code` and `state` values from the redirect page and enter them below.*",
                 "data": {
-                    "code": "Authorization Code",
-                    "state": "State"
+                    "code": "Authorization Code (optional if auto-callback works)",
+                    "state": "State (optional if auto-callback works)"
                 }
             },
             "cameras": {
@@ -26,7 +26,7 @@
         },
         "error": {
             "cannot_connect": "Failed to connect to Xiaomi cloud service",
-            "invalid_auth": "Invalid authentication. Please check your code and state values.",
+            "invalid_auth": "Invalid authentication. Please check your code and state values, or try the authorization again.",
             "unknown": "An unexpected error occurred"
         },
         "abort": {

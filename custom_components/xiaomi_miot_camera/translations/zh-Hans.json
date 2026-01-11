@@ -10,10 +10,10 @@
             },
             "auth": {
                 "title": "小米账号登录",
-                "description": "请登录你的小米账号：\n\n1. 在浏览器中打开此链接：\n{auth_url}\n\n2. 使用小米账号登录\n\n3. 授权后，你将被重定向到类似这样的地址：\n`https://my.home-assistant.io/redirect/oauth?code=xxx&state=yyy`\n\n4. 从 URL 中复制 `code` 和 `state` 的值，并在下方输入。",
+                "description": "请登录你的小米账号：\n\n**第一步：** 在浏览器中打开此链接：\n{auth_url}\n\n**第二步：** 使用小米账号登录并授权。\n\n**第三步：** 授权成功后，你会看到一个成功页面。在输入框中设置你的 Home Assistant 回调地址：\n`{callback_url}`\n\n**第四步：** 点击"跳转"按钮自动完成授权。\n\n---\n\n*备选方案：如果自动回调不起作用，你可以手动从重定向页面复制 `code` 和 `state` 的值，并在下方输入。*",
                 "data": {
-                    "code": "授权码 (code)",
-                    "state": "状态码 (state)"
+                    "code": "授权码（自动回调成功时可选）",
+                    "state": "状态码（自动回调成功时可选）"
                 }
             },
             "cameras": {
@@ -26,7 +26,7 @@
         },
         "error": {
             "cannot_connect": "无法连接到小米云服务",
-            "invalid_auth": "认证无效。请检查你的授权码和状态码。",
+            "invalid_auth": "认证无效。请检查你的授权码和状态码，或重新尝试授权。",
             "unknown": "发生了意外错误"
         },
         "abort": {

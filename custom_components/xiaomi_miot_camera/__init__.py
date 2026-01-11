@@ -21,6 +21,7 @@ from .const import (
     DEFAULT_FRAME_INTERVAL,
 )
 from .coordinator import XiaomiCameraCoordinator
+from .auth_callback import register_oauth_callback_view
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,10 +29,22 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 type XiaomiMiotCameraConfigEntry = ConfigEntry[XiaomiCameraCoordinator]
 
+# Track if callback view has been registered
+_CALLBACK_VIEW_REGISTERED = False
+
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Xiaomi MIoT Camera component."""
+    global _CALLBACK_VIEW_REGISTERED
+    
     hass.data.setdefault(DOMAIN, {})
+    
+    # Register OAuth callback view (only once)
+    if not _CALLBACK_VIEW_REGISTERED:
+        register_oauth_callback_view(hass)
+        _CALLBACK_VIEW_REGISTERED = True
+        _LOGGER.info("OAuth callback view registered")
+    
     return True
 
 
