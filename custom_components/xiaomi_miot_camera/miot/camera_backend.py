@@ -8,12 +8,17 @@ Provides a unified interface that works with either:
 """
 import asyncio
 import logging
+import os
 import platform
 from typing import Callable, Coroutine, Dict, List, Optional, Union
 
 from .types import MIoTCameraInfo, MIoTCameraStatus, MIoTCameraVideoQuality
 
 _LOGGER = logging.getLogger(__name__)
+
+# Force proxy mode - set to True for HAOS compatibility
+# Can also be controlled via environment variable XIAOMI_CAMERA_FORCE_PROXY=1
+FORCE_PROXY_MODE = True
 
 
 class CameraBackend:
@@ -334,25 +339,26 @@ async def create_camera_backend(
     """
     loop = loop or asyncio.get_event_loop()
 
-    # Check if we should use proxy
-    use_proxy = force_proxy
+    # Check if we should force proxy mode
+    use_proxy = force_proxy or FORCE_PROXY_MODE or os.environ.get("XIAOMI_CAMERA_FORCE_PROXY", "").lower() in ("1", "true", "yes")
+    
+    if use_proxy:
+        _LOGGER.info("Force proxy mode enabled")
 
-    # First check if on musl (Alpine/HAOS)
+    # Also check if on musl (Alpine/HAOS)
     if not use_proxy and _is_musl_libc():
         _LOGGER.info("Detected musl libc (Alpine/HAOS), will use proxy backend")
         use_proxy = True
 
-    # If proxy is available, prefer it (especially on HAOS)
-    proxy_available = await _is_proxy_available(proxy_url)
-    
-    if use_proxy or proxy_available:
-        if proxy_available:
+    # If proxy mode, check availability and use it
+    if use_proxy:
+        if await _is_proxy_available(proxy_url):
             _LOGGER.info("Using proxy backend at %s", proxy_url)
             return ProxyCameraBackend(proxy_url=proxy_url, loop=loop)
         else:
             raise RuntimeError(
                 "Camera streaming not available. "
-                "On Home Assistant OS, please install and start the 'Xiaomi Camera Proxy' add-on. "
+                "Please install and start the 'Xiaomi Camera Proxy' add-on. "
                 "Go to Settings → Add-ons → Add-on Store → Repositories → Add: "
                 "https://github.com/Ricky-Hao/ha-xiaomi-miot-camera"
             )

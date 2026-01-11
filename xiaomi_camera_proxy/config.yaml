@@ -1,5 +1,5 @@
 name: Xiaomi MIoT Camera Proxy
-version: "0.1.3"
+version: "0.1.4"
 slug: xiaomi_camera_proxy
 description: Camera streaming proxy for Xiaomi MIoT cameras (runs native library in glibc environment)
 url: https://github.com/Ricky-Hao/ha-xiaomi-miot-camera
