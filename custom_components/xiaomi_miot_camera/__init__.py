@@ -27,8 +27,6 @@ _LOGGER = logging.getLogger(__name__)
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
-type XiaomiMiotCameraConfigEntry = ConfigEntry[XiaomiCameraCoordinator]
-
 # Track if callback view has been registered
 _CALLBACK_VIEW_REGISTERED = False
 
@@ -49,7 +47,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: XiaomiMiotCameraConfigEntry
+    hass: HomeAssistant, entry: ConfigEntry
 ) -> bool:
     """Set up Xiaomi MIoT Camera from a config entry."""
     _LOGGER.info("Setting up Xiaomi MIoT Camera integration")
@@ -96,7 +94,7 @@ async def async_setup_entry(
 
 
 async def async_unload_entry(
-    hass: HomeAssistant, entry: XiaomiMiotCameraConfigEntry
+    hass: HomeAssistant, entry: ConfigEntry
 ) -> bool:
     """Unload a config entry."""
     _LOGGER.info("Unloading Xiaomi MIoT Camera integration")
