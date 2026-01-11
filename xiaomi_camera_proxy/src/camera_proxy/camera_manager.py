@@ -13,7 +13,8 @@ from typing import Any, Callable, Coroutine, Dict, List, Optional
 _LOGGER = logging.getLogger(__name__)
 
 # OAuth2 constants
-OAUTH2_API_HOST_DEFAULT = "api.io.mi.com"
+PROJECT_CODE = "mico"
+OAUTH2_API_HOST_DEFAULT = f"{PROJECT_CODE}.api.mijia.tech"
 OAUTH2_CLIENT_ID = "2882303761520431603"
 
 # Callback types
