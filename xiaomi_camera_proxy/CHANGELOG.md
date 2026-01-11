@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.2] - 2026-01-11
+
+### Fixed
+- Use correct API host (`mico.api.mijia.tech`) for camera library authentication
+
 ## [0.2.0] - 2026-01-11
 
 ### Changed
