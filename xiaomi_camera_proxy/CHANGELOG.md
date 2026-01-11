@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.7] - 2026-01-12
+
+### Fixed
+- Rewrite decoder to maintain codec context state per stream
+- Accumulate H.264 NAL frames (SPS/PPS/IDR) before decoding
+- This fixes "Invalid data found when processing input" errors
+
 ## [0.2.6] - 2026-01-12
 
 ### Fixed

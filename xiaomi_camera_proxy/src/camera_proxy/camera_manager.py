@@ -298,7 +298,10 @@ class CameraInstance:
                     len(frame_data), frame_type
                 )
                 try:
-                    jpg_data = self._decoder.decode_to_jpg(frame_data, actual_codec)
+                    # Pass stream_id to maintain codec state per camera
+                    jpg_data = self._decoder.decode_to_jpg(
+                        frame_data, actual_codec, stream_id=f"{self._did}_{channel}"
+                    )
                     if jpg_data:
                         _LOGGER.debug(
                             "Decoded JPG: %d bytes, callbacks: %s",
