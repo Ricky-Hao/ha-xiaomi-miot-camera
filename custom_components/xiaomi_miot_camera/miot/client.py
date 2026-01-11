@@ -6,10 +6,11 @@ MIoT Client.
 """
 # pylint: disable=too-many-arguments, too-many-positional-arguments
 # pylint: disable=too-many-instance-attributes
+from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from typing import Any, Callable, Coroutine, Dict, List, Optional, TYPE_CHECKING
 
 from .error import MIoTClientError
 from .spec import MIoTSpecParser
@@ -32,7 +33,9 @@ from .i18n import MIoTI18n
 from .cloud import MIoTOAuth2Client, MIoTHttpClient
 from .lan import MIoTLan
 from .network import MIoTNetwork
-from .camera import MIoTCamera, MIoTCameraInstance, get_camera_extra_info
+# Lazy import camera to avoid loading native library on HAOS
+if TYPE_CHECKING:
+    from .camera import MIoTCamera, MIoTCameraInstance
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,7 +59,7 @@ class MIoTClient:
     _http_client: MIoTHttpClient
     _network_client: MIoTNetwork
     _lan_client: MIoTLan
-    _camera_client: MIoTCamera
+    _camera_client: Optional["MIoTCamera"]
 
     _cameras_buffer: Optional[Dict[str, MIoTCameraInfo]]
     _last_lan_ping_ts: int
@@ -138,8 +141,8 @@ class MIoTClient:
         return self._cameras_buffer or {}
 
     @property
-    def camera_client(self) -> MIoTCamera:
-        """Camera client.
+    def camera_client(self) -> Optional["MIoTCamera"]:
+        """Camera client (may be None in proxy mode).
         """
         return self._camera_client
 
@@ -158,8 +161,12 @@ class MIoTClient:
         if did in self._callbacks_lan_device_status_changed:
             await self._callbacks_lan_device_status_changed[did](did, info)
 
-    async def init_async(self) -> None:
-        """Init the client."""
+    async def init_async(self, skip_camera: bool = False) -> None:
+        """Init the client.
+        
+        Args:
+            skip_camera: Skip camera client initialization (for proxy mode on HAOS)
+        """
         if self._init_done:
             _LOGGER.warning("client already init")
             return
@@ -188,11 +195,19 @@ class MIoTClient:
         await self._lan_client.init_async()
         await self._lan_client.register_status_changed_async(
             key="miot_client", handler=self.__on_lan_device_status_changed)
-        self._camera_client = MIoTCamera(
-            cloud_server=self._cloud_server,
-            access_token=self._oauth_info.access_token if self._oauth_info else "",
-            loop=self._main_loop)
-        await self._camera_client.init_async()
+        
+        # Skip camera client initialization in proxy mode (for HAOS compatibility)
+        if not skip_camera:
+            # Lazy import camera to avoid loading native library on HAOS
+            from .camera import MIoTCamera
+            self._camera_client = MIoTCamera(
+                cloud_server=self._cloud_server,
+                access_token=self._oauth_info.access_token if self._oauth_info else "",
+                loop=self._main_loop)
+            await self._camera_client.init_async()
+        else:
+            _LOGGER.info("Skipping native camera client initialization (proxy mode)")
+            self._camera_client = None
         self._init_done = True
 
     async def deinit_async(self) -> None:
@@ -202,7 +217,8 @@ class MIoTClient:
             return
         await self._oauth_client.deinit_async()
         await self._http_client.deinit_async()
-        await self._camera_client.deinit_async()
+        if self._camera_client:
+            await self._camera_client.deinit_async()
         await self._lan_client.unregister_status_changed_async("miot_client")
         await self._lan_client.deinit_async()
         await self._network_client.deinit_async()
@@ -385,6 +401,8 @@ class MIoTClient:
         Returns:
             Dict[str, MIoTDeviceInfo]: Camera info.
         """
+        # Lazy import to avoid loading native library on HAOS
+        from .camera import get_camera_extra_info
         camera_extra_info: MIoTCameraExtraInfo = await get_camera_extra_info()
         cameras: Dict[str, MIoTCameraInfo] = {}
         devices = await self.get_devices_async(home_list=home_list, fetch_share_home=fetch_share_home)
@@ -412,8 +430,8 @@ class MIoTClient:
             cameras[did].local_ip = None
         self._cameras_buffer = cameras
         for did, camera_info in self._cameras_buffer.items():
-            # Camera connect status
-            if did in self._camera_client.camera_map:
+            # Camera connect status (only check if native camera client is available)
+            if self._camera_client and did in self._camera_client.camera_map:
                 camera_info.camera_status = await self._camera_client.get_camera_status_async(did)
             else:
                 camera_info.camera_status = MIoTCameraStatus.DISCONNECTED
@@ -434,7 +452,7 @@ class MIoTClient:
         self, camera_info: MIoTCameraInfo,
         frame_interval: int = 500,
         enable_hw_accel: bool = True
-    ) -> MIoTCameraInstance:
+    ) -> "MIoTCameraInstance":
         """Create camera instance.
 
         Args:
@@ -443,13 +461,15 @@ class MIoTClient:
         Returns:
             MIoTCameraInstance: MIoT camera instance.
         """
+        if not self._camera_client:
+            raise MIoTClientError("Camera client not initialized (proxy mode)")
         return await self._camera_client.create_camera_async(
             camera_info=camera_info,
             frame_interval=frame_interval,
             enable_hw_accel=enable_hw_accel
         )
 
-    async def get_camera_instance_async(self, did: str) -> Optional[MIoTCameraInstance]:
+    async def get_camera_instance_async(self, did: str) -> Optional["MIoTCameraInstance"]:
         """Get camera instance by did.
 
         Args:
@@ -458,6 +478,8 @@ class MIoTClient:
         Returns:
             Optional[MIoTCameraInstance]: MIoT camera instance.
         """
+        if not self._camera_client:
+            raise MIoTClientError("Camera client not initialized (proxy mode)")
         return await self._camera_client.get_camera_instance_async(did)
 
     async def register_lan_device_changed_async(
@@ -499,6 +521,8 @@ class MIoTClient:
         Returns:
             bool: Register result.
         """
+        if not self._camera_client:
+            raise MIoTClientError("Camera client not initialized (proxy mode)")
         return await self._camera_client.register_status_changed_async(did=did, callback=callback)
 
     async def unregister_camera_status_changed_async(self, did: str) -> None:
@@ -510,6 +534,8 @@ class MIoTClient:
         Returns:
             bool: Unregister result.
         """
+        if not self._camera_client:
+            raise MIoTClientError("Camera client not initialized (proxy mode)")
         return await self._camera_client.unregister_status_changed_async(did=did)
 
     async def send_app_notify_async(self, notify_id: str) -> bool:
