@@ -62,13 +62,19 @@ def _load_dynamic_lib() -> CDLL:
     """Load the native camera library."""
     system = platform.system().lower()
     machine = platform.machine().lower()
-    lib_path = Path(__file__).parent.parent.parent / "libs"
+    
+    # In Docker container, libs are at /app/libs/
+    # Locally, they're relative to this file's location
+    lib_base = Path("/app/libs")
+    if not lib_base.exists():
+        # Fallback for local development
+        lib_base = Path(__file__).parent.parent.parent / "libs"
 
     if system == "linux":
         if machine in ("x86_64", "amd64"):
-            lib_path = lib_path / "linux" / "x86_64"
+            lib_path = lib_base / "linux" / "x86_64"
         elif machine in ("arm64", "aarch64"):
-            lib_path = lib_path / "linux" / "arm64"
+            lib_path = lib_base / "linux" / "arm64"
         else:
             raise RuntimeError(f"Unsupported Linux architecture: {machine}")
         lib_path = lib_path / "libmiot_camera_lite.so"
