@@ -237,12 +237,32 @@ class CameraProxyServer:
 
     async def _on_frame(self, did: str, data: bytes, timestamp: int, channel: int, frame_type: str):
         """Handle decoded frame callback."""
+        _LOGGER.debug(
+            "_on_frame called: did=%s, channel=%d, type=%s, data_len=%d",
+            did, channel, frame_type, len(data)
+        )
+        
         if did not in self._frame_subscriptions:
+            _LOGGER.debug("No subscriptions for did=%s", did)
             return
         if channel not in self._frame_subscriptions[did]:
+            _LOGGER.debug("No subscriptions for did=%s channel=%d", did, channel)
             return
 
+        # Validate JPEG data
+        if frame_type == "jpg" and len(data) > 2:
+            if data[:2] != b'\xff\xd8':
+                _LOGGER.warning(
+                    "Invalid JPEG header: %s (expected FFD8), len=%d",
+                    data[:2].hex(), len(data)
+                )
+            else:
+                _LOGGER.debug("Valid JPEG frame: %d bytes", len(data))
+
         # Send to all subscribed WebSocket connections
+        subscribers = self._frame_subscriptions[did][channel]
+        _LOGGER.debug("Sending frame to %d subscribers", len(subscribers))
+        
         frame_msg = {
             "type": "frame",
             "did": did,

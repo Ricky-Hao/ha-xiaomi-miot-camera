@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.5] - 2026-01-12
+
+### Added
+- Validate JPEG header (FFD8) before sending frames
+- More detailed logging for frame subscription and delivery
+
 ## [0.2.4] - 2026-01-12
 
 ### Fixed

@@ -262,11 +262,22 @@ class CameraInstance:
 
             # MJPEG (codec=5, 7, 8) - already JPEG, no decoding needed
             if codec_id in (5, 7, 8):
-                _LOGGER.debug("MJPEG frame received, sending directly as JPG")
-                for cb in self._jpg_callbacks.get(channel, []):
-                    asyncio.run_coroutine_threadsafe(
-                        cb(self._did, frame_data, timestamp, channel),
-                        self._main_loop
+                # Check if this is a valid JPEG (starts with FFD8)
+                if len(frame_data) > 2 and frame_data[:2] == b'\xff\xd8':
+                    _LOGGER.debug(
+                        "Valid MJPEG frame: %d bytes, jpg_callbacks channels: %s",
+                        len(frame_data), list(self._jpg_callbacks.keys())
+                    )
+                    for cb in self._jpg_callbacks.get(channel, []):
+                        asyncio.run_coroutine_threadsafe(
+                            cb(self._did, frame_data, timestamp, channel),
+                            self._main_loop
+                        )
+                else:
+                    _LOGGER.debug(
+                        "Skipping non-JPEG frame: codec=%d, len=%d, header=%s",
+                        codec_id, len(frame_data), 
+                        frame_data[:4].hex() if len(frame_data) >= 4 else "too short"
                     )
                 # Also send to raw video callbacks
                 for cb in self._raw_video_callbacks.get(channel, []):
