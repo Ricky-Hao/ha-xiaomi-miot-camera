@@ -14,7 +14,7 @@ from typing import Callable, Coroutine, Optional
 import aiohttp
 import psutil
 
-from miot.types import NetworkInfo, InterfaceStatus
+from .types import NetworkInfo, InterfaceStatus
 
 _LOGGER = logging.getLogger(__name__)
 

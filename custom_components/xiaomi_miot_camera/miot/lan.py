@@ -15,8 +15,8 @@ import threading
 import time
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
 
-from miot.network import MIoTNetwork
-from miot.types import InterfaceStatus, MIoTLanDeviceInfo, NetworkInfo
+from .network import MIoTNetwork
+from .types import InterfaceStatus, MIoTLanDeviceInfo, NetworkInfo
 
 _LOGGER = logging.getLogger(__name__)
 

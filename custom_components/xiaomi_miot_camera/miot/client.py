@@ -11,9 +11,9 @@ import logging
 import time
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 
-from miot.error import MIoTClientError
-from miot.spec import MIoTSpecParser
-from miot.storage import MIoTStorage
+from .error import MIoTClientError
+from .spec import MIoTSpecParser
+from .storage import MIoTStorage
 
 from .const import CLOUD_SERVER_DEFAULT, SYSTEM_LANGUAGE_DEFAULT
 from .types import (
