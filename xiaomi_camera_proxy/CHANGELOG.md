@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.6] - 2026-01-12
+
+### Fixed
+- Detect frame format by data header (00000001=H.264, FFD8=JPEG) instead of codec_id
+- Handle H.264 streams reported as codec=5
+- Decode all NAL frames (not just I-frames) to support various stream types
+
 ## [0.2.5] - 2026-01-12
 
 ### Added

@@ -260,34 +260,30 @@ class CameraInstance:
                 self._did, codec_id, channel, frame_type, len(frame_data)
             )
 
-            # MJPEG (codec=5, 7, 8) - already JPEG, no decoding needed
-            if codec_id in (5, 7, 8):
-                # Check if this is a valid JPEG (starts with FFD8)
-                if len(frame_data) > 2 and frame_data[:2] == b'\xff\xd8':
-                    _LOGGER.debug(
-                        "Valid MJPEG frame: %d bytes, jpg_callbacks channels: %s",
-                        len(frame_data), list(self._jpg_callbacks.keys())
-                    )
-                    for cb in self._jpg_callbacks.get(channel, []):
-                        asyncio.run_coroutine_threadsafe(
-                            cb(self._did, frame_data, timestamp, channel),
-                            self._main_loop
-                        )
-                else:
-                    _LOGGER.debug(
-                        "Skipping non-JPEG frame: codec=%d, len=%d, header=%s",
-                        codec_id, len(frame_data), 
-                        frame_data[:4].hex() if len(frame_data) >= 4 else "too short"
-                    )
-                # Also send to raw video callbacks
-                for cb in self._raw_video_callbacks.get(channel, []):
+            # Detect actual format by data header (more reliable than codec_id)
+            is_h264_nal = len(frame_data) >= 4 and frame_data[:4] == b'\x00\x00\x00\x01'
+            is_jpeg = len(frame_data) >= 2 and frame_data[:2] == b'\xff\xd8'
+
+            # JPEG data (MJPEG or already decoded)
+            if is_jpeg:
+                _LOGGER.debug(
+                    "Valid JPEG frame: %d bytes, jpg_callbacks channels: %s",
+                    len(frame_data), list(self._jpg_callbacks.keys())
+                )
+                for cb in self._jpg_callbacks.get(channel, []):
                     asyncio.run_coroutine_threadsafe(
-                        cb(self._did, frame_data, timestamp, sequence, channel),
+                        cb(self._did, frame_data, timestamp, channel),
                         self._main_loop
                     )
 
-            # Video frame (H264/H265)
-            elif codec_id in (27, 173):  # H264=27, H265=173
+            # H.264/H.265 NAL unit (needs decoding)
+            elif is_h264_nal:
+                # Determine codec: check NAL type for H.264 vs H.265
+                # For now, assume H.264 (codec 27) if not specified
+                actual_codec = 27  # H.264 default
+                if codec_id == 173:
+                    actual_codec = 173  # H.265
+                
                 # Raw video callbacks
                 for cb in self._raw_video_callbacks.get(channel, []):
                     asyncio.run_coroutine_threadsafe(
@@ -295,25 +291,26 @@ class CameraInstance:
                         self._main_loop
                     )
 
-                # Decode to JPG if I-frame
-                if frame_type == 1:  # I-frame
-                    _LOGGER.debug("Decoding I-frame to JPG for camera %s", self._did)
-                    try:
-                        jpg_data = self._decoder.decode_to_jpg(frame_data, codec_id)
-                        if jpg_data:
-                            _LOGGER.debug(
-                                "Decoded JPG: %d bytes, callbacks: %s",
-                                len(jpg_data), list(self._jpg_callbacks.keys())
+                # Decode to JPG - try for all NAL frames, not just I-frames
+                # Some streams may not mark frame_type correctly
+                _LOGGER.debug(
+                    "H.264 NAL frame: len=%d, frame_type=%d, decoding to JPG",
+                    len(frame_data), frame_type
+                )
+                try:
+                    jpg_data = self._decoder.decode_to_jpg(frame_data, actual_codec)
+                    if jpg_data:
+                        _LOGGER.debug(
+                            "Decoded JPG: %d bytes, callbacks: %s",
+                            len(jpg_data), list(self._jpg_callbacks.keys())
+                        )
+                        for cb in self._jpg_callbacks.get(channel, []):
+                            asyncio.run_coroutine_threadsafe(
+                                cb(self._did, jpg_data, timestamp, channel),
+                                self._main_loop
                             )
-                            for cb in self._jpg_callbacks.get(channel, []):
-                                asyncio.run_coroutine_threadsafe(
-                                    cb(self._did, jpg_data, timestamp, channel),
-                                    self._main_loop
-                                )
-                        else:
-                            _LOGGER.warning("Decoder returned empty JPG data")
-                    except Exception as e:
-                        _LOGGER.warning("Failed to decode frame: %s", e)
+                except Exception as e:
+                    _LOGGER.debug("Failed to decode frame (may be P/B frame): %s", e)
 
             # Audio frame (AAC/PCM)
             elif codec_id in (86018, 65536):  # AAC=86018, PCM=65536
@@ -324,7 +321,11 @@ class CameraInstance:
                     )
 
             else:
-                _LOGGER.debug("Unknown codec_id: %d, ignoring frame", codec_id)
+                _LOGGER.debug(
+                    "Unknown frame format: codec=%d, len=%d, header=%s",
+                    codec_id, len(frame_data),
+                    frame_data[:4].hex() if len(frame_data) >= 4 else "too short"
+                )
 
         except Exception as e:
             _LOGGER.exception("Error in raw data callback: %s", e)
