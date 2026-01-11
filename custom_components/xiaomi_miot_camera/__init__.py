@@ -4,10 +4,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 
@@ -20,8 +18,6 @@ from .const import (
     CONF_SELECTED_CAMERAS,
     DEFAULT_FRAME_INTERVAL,
 )
-from .coordinator import XiaomiCameraCoordinator
-from .auth_callback import register_oauth_callback_view
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,6 +35,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     
     # Register OAuth callback view (only once)
     if not _CALLBACK_VIEW_REGISTERED:
+        from .auth_callback import register_oauth_callback_view
         register_oauth_callback_view(hass)
         _CALLBACK_VIEW_REGISTERED = True
         _LOGGER.info("OAuth callback view registered")
@@ -50,6 +47,8 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> bool:
     """Set up Xiaomi MIoT Camera from a config entry."""
+    from .coordinator import XiaomiCameraCoordinator
+    
     _LOGGER.info("Setting up Xiaomi MIoT Camera integration")
 
     # Extract configuration
@@ -104,7 +103,7 @@ async def async_unload_entry(
 
     if unload_ok:
         # Clean up coordinator
-        coordinator: XiaomiCameraCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
+        coordinator = hass.data[DOMAIN].pop(entry.entry_id)
         await coordinator.async_shutdown()
 
     return unload_ok
