@@ -99,7 +99,9 @@ class XiaomiMiotCamera(Camera):
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
-        return self._camera_data.is_streaming
+        # Camera is available as long as we're connected to the backend
+        # The actual streaming state is indicated by is_streaming
+        return True
 
     @property
     def is_streaming(self) -> bool:
@@ -109,7 +111,7 @@ class XiaomiMiotCamera(Camera):
     @property
     def is_on(self) -> bool:
         """Return True if camera is on."""
-        return self._camera_data.is_streaming
+        return True  # Camera is always on
 
     @property
     def frame_interval(self) -> float:
@@ -120,13 +122,23 @@ class XiaomiMiotCamera(Camera):
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return a still image from the camera."""
-        frame = await self._coordinator.async_get_frame(self._did, self._channel)
-        if frame:
-            _LOGGER.debug(
-                "Got frame for camera %s channel %d: %d bytes",
-                self._did, self._channel, len(frame)
-            )
-        return frame
+        try:
+            frame = await self._coordinator.async_get_frame(self._did, self._channel)
+            if frame:
+                _LOGGER.debug(
+                    "Got frame for camera %s channel %d: %d bytes",
+                    self._did, self._channel, len(frame)
+                )
+                return frame
+            else:
+                _LOGGER.debug(
+                    "No frame available for camera %s channel %d",
+                    self._did, self._channel
+                )
+                return None
+        except Exception as err:
+            _LOGGER.error("Error getting frame for camera %s: %s", self._did, err)
+            return None
 
     async def handle_async_mjpeg_stream(
         self, request: web.Request
