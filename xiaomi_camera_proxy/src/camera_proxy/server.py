@@ -99,6 +99,9 @@ class CameraProxyServer:
         if not access_token:
             raise ValueError("access_token is required")
 
+        _LOGGER.info("Initializing camera library for cloud server: %s", cloud_server)
+        _LOGGER.debug("Access token length: %d", len(access_token) if access_token else 0)
+
         await self._camera_manager.init_async(
             cloud_server=cloud_server,
             access_token=access_token
