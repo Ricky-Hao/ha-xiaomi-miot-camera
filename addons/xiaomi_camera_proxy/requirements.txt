@@ -1,0 +1,7 @@
+aiohttp>=3.9.0
+aiocache>=0.12
+aiofiles>=24.1
+pydantic>=2.4.0
+av>=15.0
+pillow>=10.3.0
+PyYAML>=6.0

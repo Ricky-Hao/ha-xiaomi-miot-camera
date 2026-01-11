@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .miot.client import MIoTClient
-from .miot.camera import MIoTCameraInstance
+from .miot.camera_backend import CameraBackend, create_camera_backend
 from .miot.types import MIoTOauthInfo, MIoTCameraInfo, MIoTCameraStatus
 
 from .const import (
@@ -22,6 +22,7 @@ from .const import (
     DEFAULT_IMG_BUFFER_SIZE,
     DEFAULT_IMG_BUFFER_TTL,
     OAUTH2_REDIRECT_URI,
+    CONF_PROXY_URL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -69,7 +70,6 @@ class CameraFrameBuffer:
 class CameraData:
     """Data for a single camera."""
     camera_info: MIoTCameraInfo
-    instance: Optional[MIoTCameraInstance] = None
     frame_buffers: Dict[int, CameraFrameBuffer] = field(default_factory=dict)
     status: MIoTCameraStatus = MIoTCameraStatus.DISCONNECTED
     is_streaming: bool = False
@@ -86,6 +86,7 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
         oauth_info: dict,
         selected_cameras: List[str],
         frame_interval: int,
+        proxy_url: Optional[str] = None,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -98,8 +99,10 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
         self._oauth_info = MIoTOauthInfo.model_validate(oauth_info)
         self._selected_cameras = selected_cameras
         self._frame_interval = frame_interval
+        self._proxy_url = proxy_url or "ws://127.0.0.1:8765/ws"
 
         self._client: Optional[MIoTClient] = None
+        self._camera_backend: Optional[CameraBackend] = None
         self._cameras: Dict[str, CameraData] = {}
         self._initialized = False
 
@@ -132,6 +135,22 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
         # Initialize client
         await self._client.init_async()
 
+        # Create camera backend (auto-detects native vs proxy)
+        try:
+            self._camera_backend = await create_camera_backend(
+                proxy_url=self._proxy_url,
+                loop=self.hass.loop
+            )
+            version = await self._camera_backend.init_async(
+                cloud_server=self._cloud_server,
+                access_token=self._oauth_info.access_token,
+                frame_interval=self._frame_interval
+            )
+            _LOGGER.info("Camera backend initialized, version: %s", version)
+        except Exception as err:
+            _LOGGER.error("Failed to initialize camera backend: %s", err)
+            raise
+
         # Get camera list
         cameras = await self._client.get_cameras_async()
         _LOGGER.info("Found %d cameras", len(cameras))
@@ -154,15 +173,17 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
         try:
             camera_info = camera_data.camera_info
 
-            # Create camera instance
-            instance = await self._client.create_camera_instance_async(
+            # Create camera instance via backend
+            await self._camera_backend.create_camera_async(
                 camera_info=camera_info,
                 frame_interval=self._frame_interval,
             )
-            camera_data.instance = instance
 
             # Start the camera with auto-reconnect
-            await instance.start_async(enable_reconnect=True)
+            await self._camera_backend.start_camera_async(
+                did=did,
+                enable_reconnect=True
+            )
 
             # Create frame buffers for each channel
             channel_count = camera_info.channel_count or 1
@@ -179,7 +200,8 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
                         if buffer:
                             await buffer.put(data)
 
-                await instance.register_decode_jpg_async(
+                await self._camera_backend.register_decode_jpg_async(
+                    did=did,
                     callback=on_frame,
                     channel=channel,
                 )
@@ -193,7 +215,10 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
                     )
                     _LOGGER.info("Camera %s status changed to %s", status_did, status)
 
-            await instance.register_status_changed_async(callback=on_status_changed)
+            await self._camera_backend.register_status_changed_async(
+                did=did,
+                callback=on_status_changed
+            )
 
             camera_data.is_streaming = True
             _LOGGER.info("Started streaming for camera %s", did)
@@ -218,14 +243,20 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
         """Shutdown the coordinator."""
         _LOGGER.info("Shutting down Xiaomi MIoT Camera coordinator")
 
-        # Stop all camera instances
-        for did, camera_data in self._cameras.items():
-            if camera_data.instance:
-                try:
-                    await camera_data.instance.stop_async()
-                    await camera_data.instance.destroy_async()
-                except Exception as err:
-                    _LOGGER.error("Error stopping camera %s: %s", did, err)
+        # Stop all camera instances via backend
+        for did in self._cameras.keys():
+            try:
+                await self._camera_backend.stop_camera_async(did)
+                await self._camera_backend.destroy_camera_async(did)
+            except Exception as err:
+                _LOGGER.error("Error stopping camera %s: %s", did, err)
+
+        # Deinit camera backend
+        if self._camera_backend:
+            try:
+                await self._camera_backend.deinit_async()
+            except Exception as err:
+                _LOGGER.error("Error deinitializing camera backend: %s", err)
 
         # Deinit client
         if self._client:

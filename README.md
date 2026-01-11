@@ -12,12 +12,14 @@ This custom component integrates Xiaomi MIoT cameras into Home Assistant, allowi
 - 🌍 Support for multiple cloud regions (China, Europe, India, Russia, Singapore, US)
 - 🔄 Auto-reconnection on connection loss
 - 📺 Multi-channel camera support
+- 🐳 **Home Assistant OS support via Add-on**
 
 ## Requirements
 
 - Home Assistant 2024.1.0 or newer
 - A Xiaomi account with cameras linked in Mi Home app
 - Network access to Xiaomi cloud services
+- **For Home Assistant OS**: Xiaomi Camera Proxy Add-on (see below)
 
 ## Installation
 
@@ -37,6 +39,19 @@ This custom component integrates Xiaomi MIoT cameras into Home Assistant, allowi
 1. Download the `custom_components/xiaomi_miot_camera` folder from this repository
 2. Copy it to your Home Assistant's `custom_components` directory
 3. Restart Home Assistant
+
+### Home Assistant OS Users (Important!)
+
+Home Assistant OS uses Alpine Linux (musl libc), which is incompatible with the native camera library. You **must** install the Camera Proxy Add-on:
+
+1. Go to **Settings** → **Add-ons** → **Add-on Store**
+2. Click the **⋮** menu → **Repositories**
+3. Add: `https://github.com/Ricky-Hao/ha-xiaomi-miot-camera`
+4. Install the **Xiaomi Camera Proxy** add-on
+5. Start the add-on
+6. Then proceed with the integration setup
+
+The integration will automatically detect and use the proxy add-on.
 
 ## Configuration
 
@@ -112,6 +127,32 @@ This integration should work with any Xiaomi/Mi Home camera that supports stream
 - The stream quality depends on your network connection
 - Try reducing the frame interval in options
 - Ensure your Home Assistant server has sufficient resources
+
+### Home Assistant OS: "Error loading shared library"
+
+If you see an error like `Error loading shared library ld-linux-x86-64.so.2`, you need to install the Camera Proxy Add-on:
+
+1. Go to **Settings** → **Add-ons** → **Add-on Store**
+2. Add repository: `https://github.com/Ricky-Hao/ha-xiaomi-miot-camera`
+3. Install and start **Xiaomi Camera Proxy**
+4. Restart the integration
+
+## Architecture
+
+```
+┌─────────────────────────────────────┐
+│  Home Assistant                     │
+│  ├── Xiaomi MIoT Camera Component   │
+│  │   ├── Native Mode (glibc)        │  ← Ubuntu, Debian, etc.
+│  │   └── Proxy Mode (musl/HAOS) ────┼──┐
+└─────────────────────────────────────┘  │
+                                         │
+┌─────────────────────────────────────┐  │
+│  Camera Proxy Add-on (Debian)       │◄─┘
+│  ├── libmiot_camera_lite.so         │
+│  └── WebSocket API                  │
+└─────────────────────────────────────┘
+```
 
 ## Privacy Note
 

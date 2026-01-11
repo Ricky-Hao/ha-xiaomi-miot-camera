@@ -13,11 +13,13 @@ CONF_OAUTH_INFO: Final = "oauth_info"
 CONF_UUID: Final = "uuid"
 CONF_CAMERAS: Final = "cameras"
 CONF_SELECTED_CAMERAS: Final = "selected_cameras"
+CONF_PROXY_URL: Final = "proxy_url"
 
 # Default values
 DEFAULT_FRAME_INTERVAL: Final = 500  # ms
 DEFAULT_IMG_BUFFER_SIZE: Final = 20
 DEFAULT_IMG_BUFFER_TTL: Final = 10  # seconds
+DEFAULT_PROXY_URL: Final = "ws://127.0.0.1:8765/ws"
 
 # Cloud server options
 CLOUD_SERVERS: Final = {

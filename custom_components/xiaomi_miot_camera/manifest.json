@@ -1,13 +1,16 @@
 {
     "domain": "xiaomi_miot_camera",
     "name": "Xiaomi MIoT Camera",
-    "version": "1.0.0",
-    "codeowners": [],
+    "version": "0.1.0",
+    "codeowners": [
+        "@Ricky-Hao"
+    ],
     "config_flow": true,
     "dependencies": [
         "http"
     ],
-    "documentation": "https://github.com/XiaoMi/xiaomi-miloco",
+    "documentation": "https://github.com/Ricky-Hao/ha-xiaomi-miot-camera",
+    "issue_tracker": "https://github.com/Ricky-Hao/ha-xiaomi-miot-camera/issues",
     "iot_class": "cloud_push",
     "requirements": [
         "aiohttp>=3.8.0",

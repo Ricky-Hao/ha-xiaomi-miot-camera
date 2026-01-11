@@ -1,0 +1,23 @@
+name: Xiaomi MIoT Camera Proxy
+version: "0.1.0"
+slug: xiaomi_camera_proxy
+description: Camera streaming proxy for Xiaomi MIoT cameras (runs native library in glibc environment)
+url: https://github.com/Ricky-Hao/ha-xiaomi-miot-camera
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: services
+boot: auto
+host_network: true
+ports:
+  8765/tcp: 8765
+ports_description:
+  8765/tcp: WebSocket API
+map:
+  - config:rw
+options:
+  log_level: info
+schema:
+  log_level: str
+image: ghcr.io/ricky-hao/xiaomi-camera-proxy-{arch}
