@@ -119,7 +119,12 @@ This integration connects to Xiaomi cloud services to access your camera streams
 
 ## License
 
-This project is licensed under the Xiaomi Miloco License Agreement.
+This project uses a dual-license structure:
+
+- **Main project code**: Licensed under the [Apache License 2.0](LICENSE)
+- **`miot/` directory**: Contains code derived from the [Xiaomi Miloco](https://github.com/XiaoMi/xiaomi-miloco) project, licensed under the [Xiaomi Miloco License Agreement](custom_components/xiaomi_miot_camera/miot/LICENSE) (non-commercial use only)
+
+Please review the respective licenses before using or distributing this software.
 
 ## Credits
 
