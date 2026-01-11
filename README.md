@@ -19,11 +19,23 @@ This custom component integrates Xiaomi MIoT cameras into Home Assistant, allowi
 - Home Assistant 2024.1.0 or newer
 - A Xiaomi account with cameras linked in Mi Home app
 - Network access to Xiaomi cloud services
-- **For Home Assistant OS**: Xiaomi Camera Proxy Add-on (see below)
+- **Xiaomi Camera Proxy Add-on** (required for camera streaming)
 
 ## Installation
 
-### HACS (Recommended)
+### Step 1: Install the Camera Proxy Add-on (Required)
+
+The integration requires the Camera Proxy Add-on for video streaming. This add-on runs the native camera library in a compatible environment.
+
+1. Go to **Settings** → **Add-ons** → **Add-on Store**
+2. Click the **⋮** menu → **Repositories**
+3. Add: `https://github.com/Ricky-Hao/ha-xiaomi-miot-camera`
+4. Find and install the **Xiaomi Camera Proxy** add-on
+5. **Start the add-on** and ensure it's running
+
+### Step 2: Install the Integration
+
+#### HACS (Recommended)
 
 1. Open HACS in Home Assistant
 2. Click on "Integrations"
@@ -34,36 +46,24 @@ This custom component integrates Xiaomi MIoT cameras into Home Assistant, allowi
 7. Search for "Xiaomi MIoT Camera" and install it
 8. Restart Home Assistant
 
-### Manual Installation
+#### Manual Installation
 
 1. Download the `custom_components/xiaomi_miot_camera` folder from this repository
 2. Copy it to your Home Assistant's `custom_components` directory
 3. Restart Home Assistant
 
-### Home Assistant OS Users (Important!)
-
-Home Assistant OS uses Alpine Linux (musl libc), which is incompatible with the native camera library. You **must** install the Camera Proxy Add-on:
-
-1. Go to **Settings** → **Add-ons** → **Add-on Store**
-2. Click the **⋮** menu → **Repositories**
-3. Add: `https://github.com/Ricky-Hao/ha-xiaomi-miot-camera`
-4. Install the **Xiaomi Camera Proxy** add-on
-5. Start the add-on
-6. Then proceed with the integration setup
-
-The integration will automatically detect and use the proxy add-on.
-
 ## Configuration
 
-1. Go to **Settings** → **Devices & Services** → **Add Integration**
-2. Search for "Xiaomi MIoT Camera"
-3. Select your cloud server region
-4. Follow the OAuth2 login process:
+1. Ensure the **Xiaomi Camera Proxy** add-on is running
+2. Go to **Settings** → **Devices & Services** → **Add Integration**
+3. Search for "Xiaomi MIoT Camera"
+4. Select your cloud server region
+5. Follow the OAuth2 login process:
    - Click the provided link to login to your Xiaomi account
    - After authorization, copy the `code` and `state` from the redirect URL
    - Enter these values in Home Assistant
-5. Select the cameras you want to add
-6. Done! Your cameras will appear as camera entities
+6. Select the cameras you want to add
+7. Done! Your cameras will appear as camera entities
 
 ## Usage
 
@@ -110,10 +110,20 @@ This integration should work with any Xiaomi/Mi Home camera that supports stream
 
 ## Troubleshooting
 
+### "Camera streaming not available" error
+
+Make sure the Camera Proxy Add-on is installed and running:
+
+1. Go to **Settings** → **Add-ons**
+2. Find **Xiaomi Camera Proxy**
+3. Ensure it shows "Running"
+4. Check the add-on logs for any errors
+
 ### Camera shows as unavailable
 
 - Check your internet connection
 - Ensure the camera is online in the Mi Home app
+- Check that the Camera Proxy Add-on is running
 - Try restarting the integration
 
 ### Authentication failed
@@ -127,32 +137,29 @@ This integration should work with any Xiaomi/Mi Home camera that supports stream
 - The stream quality depends on your network connection
 - Try reducing the frame interval in options
 - Ensure your Home Assistant server has sufficient resources
-
-### Home Assistant OS: "Error loading shared library"
-
-If you see an error like `Error loading shared library ld-linux-x86-64.so.2`, you need to install the Camera Proxy Add-on:
-
-1. Go to **Settings** → **Add-ons** → **Add-on Store**
-2. Add repository: `https://github.com/Ricky-Hao/ha-xiaomi-miot-camera`
-3. Install and start **Xiaomi Camera Proxy**
-4. Restart the integration
+- Check the Camera Proxy Add-on logs for errors
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────┐
 │  Home Assistant                     │
-│  ├── Xiaomi MIoT Camera Component   │
-│  │   ├── Native Mode (glibc)        │  ← Ubuntu, Debian, etc.
-│  │   └── Proxy Mode (musl/HAOS) ────┼──┐
+│  └── Xiaomi MIoT Camera Component   │
+│      └── WebSocket Client ──────────┼──┐
 └─────────────────────────────────────┘  │
-                                         │
+                                         │ WebSocket (ws://127.0.0.1:8765)
 ┌─────────────────────────────────────┐  │
 │  Camera Proxy Add-on (Debian)       │◄─┘
 │  ├── libmiot_camera_lite.so         │
-│  └── WebSocket API                  │
+│  ├── Video decoding (H264→JPEG)     │
+│  └── WebSocket Server               │
 └─────────────────────────────────────┘
 ```
+
+The integration communicates with the Camera Proxy Add-on via WebSocket. The add-on handles:
+- Native camera library (`libmiot_camera_lite.so`)
+- Video stream decoding (H264/H265 to JPEG)
+- Camera connection management
 
 ## Privacy Note
 
