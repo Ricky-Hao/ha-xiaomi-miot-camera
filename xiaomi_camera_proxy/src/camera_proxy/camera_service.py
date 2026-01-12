@@ -257,11 +257,21 @@ class CameraService:
         pin_code: Optional[str] = None,
         quality: MIoTCameraVideoQuality = MIoTCameraVideoQuality.HIGH,
         enable_audio: bool = False,
+        wait_ready: bool = False,
     ) -> None:
         """Start streaming a camera.
         
         If camera is already streaming and RTSP is ready, returns immediately.
         This enables "always-on" streaming without re-initialization delay.
+        
+        Args:
+            did: Device ID
+            pin_code: Optional PIN code for encrypted cameras
+            quality: Video quality (HIGH recommended)
+            enable_audio: Whether to enable audio stream
+            wait_ready: If True, wait for RTSP stream to be ready before returning.
+                       If False (default), return immediately after starting - stream
+                       will be ready in background. Use False for faster startup.
         """
         if not self._camera_manager:
             raise ValueError("Camera manager not initialized")
@@ -278,13 +288,15 @@ class CameraService:
             if stream_ready:
                 _LOGGER.info("Camera %s already streaming, returning immediately", did)
                 return
-            else:
+            elif wait_ready:
                 _LOGGER.info("Camera %s active but stream not ready, waiting...", did)
                 # Just wait for stream to be ready
                 if self._rtsp_streamer:
                     for channel in range(camera_info.channel_count):
                         await self._wait_for_stream_ready_async(did, channel)
-                return
+            else:
+                _LOGGER.info("Camera %s active, stream starting in background", did)
+            return
         
         # Create camera instance if not exists
         if did not in self._active_cameras:
@@ -331,12 +343,12 @@ class CameraService:
         # Save active cameras for auto-restart on Add-on reboot
         await self._save_active_cameras_async()
         
-        # Wait for RTSP stream to be ready (MediaMTX publishing)
-        if self._rtsp_streamer:
+        # Wait for RTSP stream to be ready (MediaMTX publishing) only if requested
+        if wait_ready and self._rtsp_streamer:
             for channel in range(camera_info.channel_count):
                 await self._wait_for_stream_ready_async(did, channel)
         
-        _LOGGER.info("Started camera: %s", did)
+        _LOGGER.info("Started camera: %s (wait_ready=%s)", did, wait_ready)
 
     async def stop_camera_async(self, did: str) -> None:
         """Stop streaming a camera."""

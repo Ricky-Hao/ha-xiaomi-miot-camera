@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.12] - 2026-01-12
+
+### Changed
+- **Non-blocking camera start by default**: `start_camera` now returns immediately without waiting for RTSP stream
+- **New `wait_ready` parameter**: Optional parameter to wait for stream ready (default: false)
+- Integration can now start cameras without blocking, RTSP stream prepares in background
+
+### Improved
+- **Faster first-time camera startup**: Integration initialization no longer blocks waiting for stream
+- Add-on auto-starts cameras on boot, so streams are ready before user opens HA
+- Combined with 0.4.10/0.4.11 optimizations, camera opens nearly instantly
+
+### API Changes
+- `POST /camera/{did}/start` now accepts `wait_ready` boolean parameter (default: false)
+- WebSocket `start_camera` also accepts `wait_ready` parameter
+
 ## [0.4.11] - 2026-01-12
 
 ### Changed
