@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.16] - 2026-01-12
+
+### Changed
+- **RTSP internal only**: Remove external RTSP port (8554) - used internally by FFmpeg→MediaMTX
+- **Simplified ports**: Only expose API (8765) and WebRTC (8889)
+
+### Architecture
+```
+Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (external)
+```
+
 ## [0.4.15] - 2026-01-12
 
 ### Changed
