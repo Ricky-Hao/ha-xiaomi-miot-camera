@@ -36,11 +36,14 @@
         "step": {
             "init": {
                 "title": "小米 MIoT 摄像头选项",
-                "description": "配置你的小米 MIoT 摄像头集成。",
+                "description": "选择要添加到 Home Assistant 的摄像头。下方显示所有已发现的摄像头。",
                 "data": {
                     "selected_cameras": "已选摄像头"
                 }
             }
+        },
+        "error": {
+            "cannot_connect": "无法连接到 Camera Proxy 插件。请确保它正在运行。"
         }
     }
 }

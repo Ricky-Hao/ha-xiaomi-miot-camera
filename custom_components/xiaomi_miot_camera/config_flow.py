@@ -273,18 +273,38 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Manage the options."""
-        if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
-
-        # Get current cameras from coordinator
-        coordinator = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id)
-        if coordinator:
+        errors: dict[str, str] = {}
+        
+        # Get ALL cameras from Add-on (not just selected ones)
+        camera_options = {}
+        try:
+            proxy_client = CameraProxyHttpClient(proxy_url=DEFAULT_PROXY_URL)
+            all_cameras = await proxy_client.get_cameras_async()
+            await proxy_client.close_async()
+            
             camera_options = {
-                did: data.camera_info.name
-                for did, data in coordinator.cameras.items()
+                did: camera.name
+                for did, camera in all_cameras.items()
             }
-        else:
-            camera_options = {}
+            _LOGGER.debug("Options flow: found %d cameras from Add-on", len(camera_options))
+        except Exception as err:
+            _LOGGER.error("Failed to get cameras from Add-on: %s", err)
+            errors["base"] = "cannot_connect"
+        
+        if user_input is not None and not errors:
+            # Update config entry data with new selection
+            new_data = dict(self._config_entry.data)
+            new_data[CONF_SELECTED_CAMERAS] = user_input.get(CONF_SELECTED_CAMERAS, [])
+            
+            self.hass.config_entries.async_update_entry(
+                self._config_entry,
+                data=new_data,
+            )
+            
+            # Reload the integration to apply changes
+            await self.hass.config_entries.async_reload(self._config_entry.entry_id)
+            
+            return self.async_create_entry(title="", data={})
 
         current_selected = self._config_entry.data.get(CONF_SELECTED_CAMERAS, [])
 
@@ -296,4 +316,5 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
                     default=current_selected,
                 ): cv.multi_select(camera_options) if camera_options else str,
             }),
+            errors=errors,
         )

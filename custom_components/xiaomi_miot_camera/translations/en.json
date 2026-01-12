@@ -36,11 +36,14 @@
         "step": {
             "init": {
                 "title": "Xiaomi MIoT Camera Options",
-                "description": "Configure your Xiaomi MIoT Camera integration.",
+                "description": "Select cameras to add to Home Assistant. All discovered cameras are shown below.",
                 "data": {
                     "selected_cameras": "Selected Cameras"
                 }
             }
+        },
+        "error": {
+            "cannot_connect": "Failed to connect to Camera Proxy Add-on. Please ensure it is running."
         }
     }
 }
