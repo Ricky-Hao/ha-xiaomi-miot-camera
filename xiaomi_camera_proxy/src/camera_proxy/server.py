@@ -20,7 +20,7 @@ from .rtsp_streamer import RTSPStreamer
 
 _LOGGER = logging.getLogger(__name__)
 
-__version__ = "0.6.20"
+__version__ = "0.6.21"
 
 
 class CameraProxyServer:
@@ -95,6 +95,9 @@ class CameraProxyServer:
         # Device discovery
         app.router.add_get("/devices", self._handle_get_devices)
         app.router.add_get("/cameras", self._handle_get_cameras)
+        
+        # Configuration
+        app.router.add_post("/config/cameras", self._handle_set_configured_cameras)
         
         # Camera control
         app.router.add_post("/camera/{did}/start", self._handle_start_camera)
@@ -225,6 +228,24 @@ class CameraProxyServer:
             })
         except Exception as e:
             _LOGGER.exception("Error getting cameras")
+            return web.json_response({"error": str(e)}, status=500)
+
+    # ==================== Configuration ====================
+
+    async def _handle_set_configured_cameras(self, request: web.Request) -> web.Response:
+        """Set configured cameras (from HA Integration).
+        
+        These cameras will be auto-started on Add-on boot.
+        """
+        try:
+            data = await request.json()
+            camera_dids = data.get("camera_dids", [])
+            
+            await self._camera_service.set_configured_cameras_async(camera_dids)
+            
+            return web.json_response({"status": "ok", "configured_count": len(camera_dids)})
+        except Exception as e:
+            _LOGGER.exception("Error setting configured cameras")
             return web.json_response({"error": str(e)}, status=500)
 
     # ==================== Camera Control ====================

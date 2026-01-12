@@ -47,7 +47,8 @@ _LOGGER = logging.getLogger(__name__)
 # Persistent storage path
 CONFIG_PATH = Path("/data")
 TOKENS_FILE = CONFIG_PATH / "tokens.json"
-ACTIVE_CAMERAS_FILE = CONFIG_PATH / "active_cameras.json"
+ACTIVE_CAMERAS_FILE = CONFIG_PATH / "active_cameras.json"  # Legacy, no longer used
+CONFIGURED_CAMERAS_FILE = CONFIG_PATH / "configured_cameras.json"  # Set by HA Integration
 
 
 class CameraService:
@@ -289,6 +290,30 @@ class CameraService:
             await self.discover_devices_async()
         return self._camera_list
 
+    async def set_configured_cameras_async(self, camera_dids: List[str]) -> None:
+        """Set and save configured cameras (from HA Integration).
+        
+        This is called when the HA Integration is configured/reconfigured.
+        The configured cameras will be auto-started on Add-on boot.
+        
+        Args:
+            camera_dids: List of camera device IDs configured in HA
+        """
+        try:
+            import aiofiles
+            CONFIG_PATH.mkdir(parents=True, exist_ok=True)
+            
+            data = {
+                "configured_dids": camera_dids,
+            }
+            
+            async with aiofiles.open(CONFIGURED_CAMERAS_FILE, "w") as f:
+                await f.write(json.dumps(data, indent=2))
+            
+            _LOGGER.info("Saved configured cameras: %s", camera_dids)
+        except Exception as e:
+            _LOGGER.error("Failed to save configured cameras: %s", e)
+
     # ==================== Camera Control ====================
 
     async def start_camera_async(
@@ -377,9 +402,6 @@ class CameraService:
             enable_reconnect=True,
         )
         
-        # Save active cameras for auto-restart on Add-on reboot
-        await self._save_active_cameras_async()
-        
         # Always wait for stream to be ready for new cameras
         # This ensures WebRTC can start immediately when user opens camera
         if self._rtsp_streamer:
@@ -415,9 +437,6 @@ class CameraService:
                     await self._rtsp_streamer.stop_stream(did, channel)
             
             del self._active_cameras[did]
-            
-            # Update saved active cameras
-            await self._save_active_cameras_async()
             
             _LOGGER.info("Stopped camera: %s (connection released)", did)
 
@@ -508,29 +527,34 @@ class CameraService:
         except Exception as e:
             _LOGGER.error("Failed to save tokens: %s", e)
 
-    async def _save_active_cameras_async(self) -> None:
-        """Save active cameras list for auto-restart on boot."""
-        try:
-            import aiofiles
-            CONFIG_PATH.mkdir(parents=True, exist_ok=True)
-            
-            data = {
-                "active_dids": list(self._active_cameras.keys()),
-            }
-            
-            async with aiofiles.open(ACTIVE_CAMERAS_FILE, "w") as f:
-                await f.write(json.dumps(data, indent=2))
-            
-            _LOGGER.info("Saved active cameras to %s: %s", ACTIVE_CAMERAS_FILE, list(self._active_cameras.keys()))
-        except Exception as e:
-            _LOGGER.error("Failed to save active cameras: %s", e)
-
     async def _load_and_start_active_cameras_async(self) -> None:
-        """Load and auto-start previously active cameras."""
-        _LOGGER.info("Checking for previously active cameras at: %s", ACTIVE_CAMERAS_FILE)
+        """Load and auto-start configured cameras.
+        
+        Uses the configured_cameras.json file which is set by HA Integration.
+        Falls back to legacy active_cameras.json if configured file doesn't exist.
+        """
+        # Try new configured cameras file first
+        if CONFIGURED_CAMERAS_FILE.exists():
+            _LOGGER.info("Loading configured cameras from: %s", CONFIGURED_CAMERAS_FILE)
+            try:
+                import aiofiles
+                async with aiofiles.open(CONFIGURED_CAMERAS_FILE, "r") as f:
+                    data = json.loads(await f.read())
+                
+                camera_dids = data.get("configured_dids", [])
+                _LOGGER.info("Configured cameras: %s", camera_dids)
+                
+                if camera_dids:
+                    await self._start_cameras_by_dids_async(camera_dids)
+                    return
+            except Exception as e:
+                _LOGGER.warning("Failed to load configured cameras: %s", e)
+        
+        # Fall back to legacy active cameras file
+        _LOGGER.info("No configured cameras file, checking legacy file: %s", ACTIVE_CAMERAS_FILE)
         
         if not ACTIVE_CAMERAS_FILE.exists():
-            _LOGGER.info("No active cameras file found, skipping auto-start")
+            _LOGGER.info("No cameras file found, skipping auto-start")
             return
 
         try:
@@ -539,32 +563,37 @@ class CameraService:
                 data = json.loads(await f.read())
             
             active_dids = data.get("active_dids", [])
-            _LOGGER.info("Active cameras file contains: %s", active_dids)
+            _LOGGER.info("Legacy active cameras: %s", active_dids)
             
-            if not active_dids:
-                _LOGGER.info("No active cameras in file, skipping auto-start")
-                return
-            
-            _LOGGER.info("Found %d previously active cameras to auto-start", len(active_dids))
-            
-            # Discover cameras first
-            if not self._camera_list:
-                await self.discover_devices_async()
-            
-            # Start each camera
-            for did in active_dids:
-                if did in self._camera_list:
-                    try:
-                        _LOGGER.info("Auto-starting camera: %s", did)
-                        await self.start_camera_async(did)
-                    except Exception as e:
-                        _LOGGER.warning("Failed to auto-start camera %s: %s", did, e)
-                else:
-                    _LOGGER.warning("Previously active camera %s not found, skipping", did)
-            
-            _LOGGER.info("Auto-start complete, %d cameras active", len(self._active_cameras))
+            if active_dids:
+                await self._start_cameras_by_dids_async(active_dids)
         except Exception as e:
-            _LOGGER.warning("Failed to load active cameras: %s", e)
+            _LOGGER.warning("Failed to load legacy active cameras: %s", e)
+
+    async def _start_cameras_by_dids_async(self, camera_dids: List[str]) -> None:
+        """Start cameras by device IDs.
+        
+        Args:
+            camera_dids: List of camera device IDs to start
+        """
+        _LOGGER.info("Auto-starting %d cameras: %s", len(camera_dids), camera_dids)
+        
+        # Discover cameras first
+        if not self._camera_list:
+            await self.discover_devices_async()
+        
+        # Start each camera
+        for did in camera_dids:
+            if did in self._camera_list:
+                try:
+                    _LOGGER.info("Auto-starting camera: %s", did)
+                    await self.start_camera_async(did)
+                except Exception as e:
+                    _LOGGER.warning("Failed to auto-start camera %s: %s", did, e)
+            else:
+                _LOGGER.warning("Configured camera %s not found in discovered cameras, skipping", did)
+        
+        _LOGGER.info("Auto-start complete, %d cameras active", len(self._active_cameras))
 
     def _is_camera_device(self, device: MIoTDeviceInfo, extra_info) -> bool:
         """Check if device is a camera."""

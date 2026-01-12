@@ -88,6 +88,12 @@ class CameraBackend:
             self._cameras = await self._client.get_cameras_async()
         return self._cameras
 
+    async def set_configured_cameras_async(self, camera_dids: List[str]) -> bool:
+        """Set the list of configured cameras for auto-start."""
+        if self._client:
+            return await self._client.set_configured_cameras_async(camera_dids)
+        return False
+
     async def start_camera_async(
         self,
         did: str,

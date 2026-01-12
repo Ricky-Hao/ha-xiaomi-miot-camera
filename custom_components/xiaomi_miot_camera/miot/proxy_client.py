@@ -156,6 +156,20 @@ class CameraProxyHttpClient:
             cameras[did] = MIoTCameraInfo.model_validate(data)
         return cameras
 
+    # ==================== Configuration ====================
+
+    async def set_configured_cameras_async(self, camera_dids: List[str]) -> bool:
+        """Set the list of configured cameras that should auto-start.
+        
+        This is called by the Integration during setup to tell Add-on
+        which cameras are selected. Add-on will auto-start these cameras
+        on boot and after reconfiguration.
+        """
+        result = await self._post("/config/cameras", {
+            "camera_dids": camera_dids,
+        })
+        return result.get("status") == "ok"
+
     # ==================== Camera Control ====================
 
     async def start_camera_async(

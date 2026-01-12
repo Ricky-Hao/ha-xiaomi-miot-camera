@@ -120,9 +120,14 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
         cameras = await self._backend.get_cameras_async()
         _LOGGER.info("Found %d cameras from Add-on", len(cameras))
 
+        # Determine which cameras to use
+        configured_dids = []
+        
         # Filter selected cameras and sync status from Add-on
         for did, camera_info in cameras.items():
             if not self._selected_cameras or did in self._selected_cameras:
+                configured_dids.append(did)
+                
                 # Get current status from Add-on (camera might already be streaming)
                 status = await self._backend.get_camera_status_async(did)
                 is_streaming = (status == MIoTCameraStatus.CONNECTED)
@@ -134,6 +139,11 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
                 )
                 _LOGGER.info("Added camera: %s (%s), status=%s, streaming=%s", 
                             camera_info.name, did, status.name, is_streaming)
+        
+        # Tell Add-on which cameras are configured (for auto-start on boot)
+        if configured_dids:
+            await self._backend.set_configured_cameras_async(configured_dids)
+            _LOGGER.info("Configured %d cameras for auto-start: %s", len(configured_dids), configured_dids)
         
         self._initialized = True
         _LOGGER.info("Coordinator initialization complete")
