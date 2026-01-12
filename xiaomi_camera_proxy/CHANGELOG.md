@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.13] - 2026-01-12
+
+### Fixed
+- **Revert non-blocking start**: Always wait for RTSP stream to be ready before returning
+- **Fix HLS playlist delay**: 0.4.12's non-blocking approach caused HA's stream component to wait at HLS level
+- Removed `wait_ready` parameter - always ensure stream is ready
+
+### Behavior
+- If camera already streaming and ready → returns immediately (0 delay)
+- If camera already active but stream not ready → waits for stream
+- If camera not active → starts camera and waits for stream to be ready
+- This ensures HLS playlist generation doesn't block waiting for RTSP data
+
 ## [0.4.12] - 2026-01-12
 
 ### Changed

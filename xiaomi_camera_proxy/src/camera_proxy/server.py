@@ -228,7 +228,11 @@ class CameraProxyServer:
     # ==================== Camera Control ====================
 
     async def _handle_start_camera(self, request: web.Request) -> web.Response:
-        """Start camera streaming."""
+        """Start camera streaming.
+        
+        Always waits for stream to be ready before returning.
+        If camera is already streaming and ready, returns immediately.
+        """
         did = request.match_info["did"]
         try:
             data = await request.json() if request.body_exists else {}
@@ -240,16 +244,11 @@ class CameraProxyServer:
             except ValueError:
                 quality = MIoTCameraVideoQuality.HIGH
             
-            # wait_ready: if True, wait for RTSP stream to be ready before returning
-            # Default False for faster startup - stream ready in background
-            wait_ready = data.get("wait_ready", False)
-            
             await self._camera_service.start_camera_async(
                 did=did,
                 pin_code=data.get("pin_code"),
                 quality=quality,
                 enable_audio=data.get("enable_audio", False),
-                wait_ready=wait_ready,
             )
             
             return web.json_response({
@@ -380,7 +379,6 @@ class CameraProxyServer:
         await self._camera_service.start_camera_async(
             did=did,
             pin_code=msg.get("pin_code"),
-            wait_ready=msg.get("wait_ready", False),
         )
         return {"status": "ok", "rtsp_url": self._camera_service.get_rtsp_url(did)}
 

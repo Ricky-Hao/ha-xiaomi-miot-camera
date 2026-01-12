@@ -257,21 +257,15 @@ class CameraService:
         pin_code: Optional[str] = None,
         quality: MIoTCameraVideoQuality = MIoTCameraVideoQuality.HIGH,
         enable_audio: bool = False,
-        wait_ready: bool = False,
     ) -> None:
         """Start streaming a camera.
         
-        If camera is already streaming and RTSP is ready, returns immediately.
-        This enables "always-on" streaming without re-initialization delay.
+        Behavior:
+        - If camera is already active AND RTSP stream is ready: returns immediately (0 delay)
+        - If camera is already active but stream not ready: waits for stream
+        - If camera is not active: starts camera and waits for stream to be ready
         
-        Args:
-            did: Device ID
-            pin_code: Optional PIN code for encrypted cameras
-            quality: Video quality (HIGH recommended)
-            enable_audio: Whether to enable audio stream
-            wait_ready: If True, wait for RTSP stream to be ready before returning.
-                       If False (default), return immediately after starting - stream
-                       will be ready in background. Use False for faster startup.
+        This ensures HLS playlist generation doesn't block waiting for RTSP data.
         """
         if not self._camera_manager:
             raise ValueError("Camera manager not initialized")
@@ -281,55 +275,54 @@ class CameraService:
 
         camera_info = self._camera_list[did]
         
-        # Fast path: if camera is already active and streaming, return immediately
+        # Fast path: if camera is already active, check stream status
         if did in self._active_cameras:
             # Check if RTSP stream is already ready
             stream_ready = await self._check_stream_ready_async(did, 0)
             if stream_ready:
-                _LOGGER.info("Camera %s already streaming, returning immediately", did)
+                _LOGGER.info("Camera %s already streaming and ready, returning immediately", did)
                 return
-            elif wait_ready:
+            else:
                 _LOGGER.info("Camera %s active but stream not ready, waiting...", did)
-                # Just wait for stream to be ready
+                # Wait for stream to be ready
                 if self._rtsp_streamer:
                     for channel in range(camera_info.channel_count):
                         await self._wait_for_stream_ready_async(did, channel)
-            else:
-                _LOGGER.info("Camera %s active, stream starting in background", did)
-            return
+                _LOGGER.info("Camera %s stream now ready", did)
+                return
         
-        # Create camera instance if not exists
-        if did not in self._active_cameras:
-            instance = await self._camera_manager.create_camera_async(camera_info)
-            self._active_cameras[did] = instance
-            
-            # Start RTSP streams first (before registering callbacks)
-            if self._rtsp_streamer:
-                for channel in range(camera_info.channel_count):
-                    await self._rtsp_streamer.start_stream(did, channel)
-                    _LOGGER.info("Started RTSP stream for %s channel %d", did, channel)
-            
-            # Register callbacks for each channel
+        # Create camera instance (first time)
+        _LOGGER.info("Starting new camera: %s", did)
+        instance = await self._camera_manager.create_camera_async(camera_info)
+        self._active_cameras[did] = instance
+        
+        # Start RTSP streams first (before registering callbacks)
+        if self._rtsp_streamer:
             for channel in range(camera_info.channel_count):
-                # Raw video -> RTSP
-                await self._camera_manager.register_raw_video_async(
-                    did=did,
-                    channel=channel,
-                    callback=self._on_raw_video_frame,
-                )
-                
-                # Decoded JPG -> Snapshot
-                await self._camera_manager.register_decode_jpg_async(
-                    did=did,
-                    channel=channel,
-                    callback=self._on_decoded_jpg,
-                )
-                
-                # Status changed
-                await self._camera_manager.register_status_changed_async(
-                    did=did,
-                    callback=self._on_camera_status_changed,
-                )
+                await self._rtsp_streamer.start_stream(did, channel)
+                _LOGGER.info("Started RTSP stream for %s channel %d", did, channel)
+        
+        # Register callbacks for each channel
+        for channel in range(camera_info.channel_count):
+            # Raw video -> RTSP
+            await self._camera_manager.register_raw_video_async(
+                did=did,
+                channel=channel,
+                callback=self._on_raw_video_frame,
+            )
+            
+            # Decoded JPG -> Snapshot
+            await self._camera_manager.register_decode_jpg_async(
+                did=did,
+                channel=channel,
+                callback=self._on_decoded_jpg,
+            )
+            
+            # Status changed
+            await self._camera_manager.register_status_changed_async(
+                did=did,
+                callback=self._on_camera_status_changed,
+            )
         
         # Start streaming
         await self._camera_manager.start_camera_async(
@@ -343,12 +336,13 @@ class CameraService:
         # Save active cameras for auto-restart on Add-on reboot
         await self._save_active_cameras_async()
         
-        # Wait for RTSP stream to be ready (MediaMTX publishing) only if requested
-        if wait_ready and self._rtsp_streamer:
+        # Always wait for RTSP stream to be ready for new cameras
+        # This ensures HLS can start immediately when user opens camera
+        if self._rtsp_streamer:
             for channel in range(camera_info.channel_count):
                 await self._wait_for_stream_ready_async(did, channel)
         
-        _LOGGER.info("Started camera: %s (wait_ready=%s)", did, wait_ready)
+        _LOGGER.info("Started camera: %s (stream ready)", did)
 
     async def stop_camera_async(self, did: str) -> None:
         """Stop streaming a camera."""
