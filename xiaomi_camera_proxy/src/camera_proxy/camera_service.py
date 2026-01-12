@@ -349,8 +349,10 @@ class CameraService:
         
         # Start streaming
         # Use a list of QualityValue to allow any integer (including experimental 4/5)
+        # TESTING: Force quality=4 to test if camera supports higher quality
+        quality = 4  # FORCE TEST
         quality_list = [QualityValue(quality) for _ in range(camera_info.channel_count)]
-        _LOGGER.info("Starting camera %s with quality=%d (list=%s)", did, quality, quality_list)
+        _LOGGER.info("Starting camera %s with quality=%d (list=%s) [FORCED FOR TESTING]", did, quality, quality_list)
         
         await self._camera_manager.start_camera_async(
             did=did,
