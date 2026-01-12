@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.13] - 2026-01-12 (Integration)
+
+### Fixed
+- **Add explicit stream_source() method**: Returns None to indicate HLS/RTSP streaming is not supported
+- This camera integration only supports WebRTC streaming
+- The `play_stream` service (to cast to media players) is not supported - this is expected behavior
+
 ## [0.4.12] - 2026-01-12 (Integration)
 
 ### Fixed

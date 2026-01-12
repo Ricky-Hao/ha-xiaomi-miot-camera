@@ -98,6 +98,15 @@ class XiaomiMiotCamera(Camera):
         # WebRTC WHEP endpoint
         self._whep_url = f"{WEBRTC_BASE_URL}/camera/{self._did}/{self._channel}/whep"
 
+    async def stream_source(self) -> str | None:
+        """Return the stream source.
+        
+        This camera only supports WebRTC streaming, not HLS/RTSP.
+        Return None to indicate HLS streaming is not available.
+        Services like play_stream that require HLS will not work.
+        """
+        return None
+
     async def async_handle_web_rtc_offer(self, offer_sdp: str) -> str | None:
         """Handle WebRTC offer and return answer SDP.
         
