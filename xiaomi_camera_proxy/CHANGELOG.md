@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.12] - 2026-01-12 (Integration)
+
+### Fixed
+- **Fix device cleanup on reconfigure**: Devices are now properly removed when cameras are deselected in options flow
+- Previously only entities were removed, but devices remained in the registry
+- Changed logic to pre-calculate which devices need removal instead of checking after entity deletion
+
 ## [0.4.18] - 2026-01-12
 
 ### Fixed
