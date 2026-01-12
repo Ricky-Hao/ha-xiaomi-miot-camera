@@ -26,7 +26,21 @@ def main():
         choices=["debug", "info", "warning", "error"],
         help="Log level (default: info)",
     )
+    parser.add_argument(
+        "--transcode-h264",
+        action="store_true",
+        default=True,
+        help="Transcode H.265 to H.264 for browser WebRTC compatibility (default: true)",
+    )
+    parser.add_argument(
+        "--no-transcode-h264",
+        action="store_true",
+        help="Disable H.265 to H.264 transcoding (use H.265 passthrough)",
+    )
     args = parser.parse_args()
+    
+    # Handle transcode option
+    transcode_h264 = args.transcode_h264 and not args.no_transcode_h264
 
     # Setup logging
     logging.basicConfig(
@@ -40,7 +54,7 @@ def main():
 
     # Run server
     async def run():
-        server = CameraProxyServer(host=args.host, port=args.port)
+        server = CameraProxyServer(host=args.host, port=args.port, transcode_h264=transcode_h264)
         await server.start_async()
         try:
             while True:

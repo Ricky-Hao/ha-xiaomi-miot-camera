@@ -31,15 +31,21 @@ __version__ = "0.4.0"
 class CameraProxyServer:
     """Camera Proxy HTTP/WebSocket Server."""
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 8765):
-        """Initialize server."""
+    def __init__(self, host: str = "0.0.0.0", port: int = 8765, transcode_h264: bool = True):
+        """Initialize server.
+        
+        Args:
+            host: Host to bind
+            port: Port to bind  
+            transcode_h264: If True, transcode H.265 to H.264 for browser compatibility
+        """
         self._host = host
         self._port = port
         self._app: Optional[web.Application] = None
         self._runner: Optional[web.AppRunner] = None
         
         # Core services
-        self._rtsp_streamer = RTSPStreamer()
+        self._rtsp_streamer = RTSPStreamer(transcode_h264=transcode_h264)
         self._camera_service = CameraService()
         
         # WebSocket connections for legacy frame streaming

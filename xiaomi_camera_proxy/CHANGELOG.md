@@ -372,3 +372,12 @@ Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (exte
 - Improved frame logging: log first frame and every 30 frames (once per second)
 - Added sourceOnDemand: no to MediaMTX config
 - This will help identify if miot_kit stops sending frames
+
+## [0.5.5] - 2025-01-12
+
+### Added
+- **H.265→H.264 transcoding** for browser WebRTC compatibility
+  - Enabled by default (`transcode_h264: true` in Add-on config)
+  - Solves HLS fallback issue - WebRTC should work in all browsers now
+  - Uses FFmpeg libx264 with ultrafast preset for low latency
+  - Disable via Add-on config if your browser supports H.265 WebRTC

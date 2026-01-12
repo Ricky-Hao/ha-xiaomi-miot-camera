@@ -116,13 +116,22 @@ class FFmpegWriter(threading.Thread):
 class RTSPStreamer:
     """Push H.264/H.265 streams to MediaMTX RTSP server."""
 
-    def __init__(self):
-        """Initialize RTSP streamer."""
+    def __init__(self, transcode_h264: bool = True):
+        """Initialize RTSP streamer.
+        
+        Args:
+            transcode_h264: If True, transcode H.265 to H.264 for better browser compatibility.
+                           This enables WebRTC in all browsers but uses more CPU.
+        """
         self._streamers: Dict[str, subprocess.Popen] = {}
         self._writers: Dict[str, FFmpegWriter] = {}
         self._detected_codecs: Dict[str, int] = {}
         self._frame_counts: Dict[str, int] = {}
         self._prepared_streams: set = set()
+        self._transcode_h264 = transcode_h264
+        
+        if transcode_h264:
+            _LOGGER.info("H.265→H.264 transcoding enabled for better WebRTC compatibility")
 
     def _is_stream_running(self, stream_key: str) -> bool:
         """Check if FFmpeg process is still running."""
@@ -145,6 +154,9 @@ class RTSPStreamer:
             rtsp_url = f"rtsp://localhost:8554/camera/{did}/{channel}"
             input_format = "hevc" if codec_id == 5 else "h264"
             
+            # Determine if we need to transcode
+            need_transcode = self._transcode_h264 and codec_id == 5  # H.265
+            
             # Key FFmpeg settings for low latency:
             # - probesize 32K: just enough for VPS/SPS/PPS in first IDR frame
             # - analyzeduration 0: don't wait to analyze
@@ -161,14 +173,38 @@ class RTSPStreamer:
                 "-flags", "low_delay",
                 "-f", input_format,
                 "-i", "pipe:0",
-                # Output: copy, no delay
-                "-c:v", "copy",
+            ]
+            
+            if need_transcode:
+                # Transcode H.265 to H.264 for browser WebRTC compatibility
+                # Use fast preset and tune for low latency
+                cmd.extend([
+                    "-c:v", "libx264",
+                    "-preset", "ultrafast",
+                    "-tune", "zerolatency",
+                    "-profile:v", "baseline",  # Most compatible
+                    "-level", "3.1",
+                    "-b:v", "2M",  # 2 Mbps bitrate
+                    "-maxrate", "2M",
+                    "-bufsize", "1M",
+                    "-g", "30",  # Keyframe every 30 frames
+                    "-keyint_min", "30",
+                ])
+                output_codec = "H.264 (transcoded)"
+            else:
+                # Copy codec (H.264 or H.265 passthrough)
+                cmd.extend(["-c:v", "copy"])
+                output_codec = "H.265" if codec_id == 5 else "H.264"
+            
+            # Output settings
+            cmd.extend([
                 "-f", "rtsp",
                 "-rtsp_transport", "tcp",
                 rtsp_url
-            ]
+            ])
             
-            _LOGGER.info("Starting FFmpeg [%s]: %s -> %s", stream_key, input_format, rtsp_url)
+            _LOGGER.info("Starting FFmpeg [%s]: %s -> %s (%s)", 
+                        stream_key, input_format, rtsp_url, output_codec)
             
             process = subprocess.Popen(
                 cmd,
