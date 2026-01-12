@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.10] - 2026-01-12
+
+### Added
+- **Auto-start cameras on Add-on restart**: Previously active cameras are now saved and automatically restarted when Add-on boots
+- **Wait for RTSP stream ready**: Camera start now waits for MediaMTX to confirm stream is publishing before returning
+
+### Fixed
+- **Issue 1**: Add-on restart no longer requires Integration re-initialization - cameras auto-start from saved state
+- **Issue 2**: First camera view no longer shows frozen frame - ensures stream is ready before HA connects
+
 ## [0.4.2] - 2026-01-12
 
 ### Fixed

@@ -34,6 +34,7 @@ _LOGGER = logging.getLogger(__name__)
 # Persistent storage path
 CONFIG_PATH = Path("/data")
 TOKENS_FILE = CONFIG_PATH / "tokens.json"
+ACTIVE_CAMERAS_FILE = CONFIG_PATH / "active_cameras.json"
 
 
 class CameraService:
@@ -87,6 +88,10 @@ class CameraService:
         await self._load_tokens_async()
         
         _LOGGER.info("Camera service initialized")
+        
+        # Auto-start previously active cameras (after a brief delay for service stability)
+        if self._oauth_info:
+            asyncio.create_task(self._delayed_auto_start_async())
 
     async def deinit_async(self) -> None:
         """Deinitialize the service."""
@@ -304,6 +309,14 @@ class CameraService:
             enable_reconnect=True,
         )
         
+        # Save active cameras for auto-restart on Add-on reboot
+        await self._save_active_cameras_async()
+        
+        # Wait for RTSP stream to be ready (MediaMTX publishing)
+        if self._rtsp_streamer:
+            for channel in range(camera_info.channel_count):
+                await self._wait_for_stream_ready_async(did, channel)
+        
         _LOGGER.info("Started camera: %s", did)
 
     async def stop_camera_async(self, did: str) -> None:
@@ -321,6 +334,10 @@ class CameraService:
                     await self._rtsp_streamer.stop_stream(did, channel)
             
             del self._active_cameras[did]
+            
+            # Update saved active cameras
+            await self._save_active_cameras_async()
+            
             _LOGGER.info("Stopped camera: %s", did)
 
     async def get_camera_status_async(self, did: str) -> MIoTCameraStatus:
@@ -410,6 +427,58 @@ class CameraService:
         except Exception as e:
             _LOGGER.error("Failed to save tokens: %s", e)
 
+    async def _save_active_cameras_async(self) -> None:
+        """Save active cameras list for auto-restart on boot."""
+        try:
+            import aiofiles
+            CONFIG_PATH.mkdir(parents=True, exist_ok=True)
+            
+            data = {
+                "active_dids": list(self._active_cameras.keys()),
+            }
+            
+            async with aiofiles.open(ACTIVE_CAMERAS_FILE, "w") as f:
+                await f.write(json.dumps(data, indent=2))
+            
+            _LOGGER.debug("Saved active cameras: %s", list(self._active_cameras.keys()))
+        except Exception as e:
+            _LOGGER.error("Failed to save active cameras: %s", e)
+
+    async def _load_and_start_active_cameras_async(self) -> None:
+        """Load and auto-start previously active cameras."""
+        if not ACTIVE_CAMERAS_FILE.exists():
+            return
+
+        try:
+            import aiofiles
+            async with aiofiles.open(ACTIVE_CAMERAS_FILE, "r") as f:
+                data = json.loads(await f.read())
+            
+            active_dids = data.get("active_dids", [])
+            if not active_dids:
+                return
+            
+            _LOGGER.info("Found %d previously active cameras to auto-start", len(active_dids))
+            
+            # Discover cameras first
+            if not self._camera_list:
+                await self.discover_devices_async()
+            
+            # Start each camera
+            for did in active_dids:
+                if did in self._camera_list:
+                    try:
+                        _LOGGER.info("Auto-starting camera: %s", did)
+                        await self.start_camera_async(did)
+                    except Exception as e:
+                        _LOGGER.warning("Failed to auto-start camera %s: %s", did, e)
+                else:
+                    _LOGGER.warning("Previously active camera %s not found, skipping", did)
+            
+            _LOGGER.info("Auto-start complete, %d cameras active", len(self._active_cameras))
+        except Exception as e:
+            _LOGGER.warning("Failed to load active cameras: %s", e)
+
     def _is_camera_device(self, device: MIoTDeviceInfo, extra_info) -> bool:
         """Check if device is a camera."""
         _LOGGER.debug("Checking device: %s (model: %s)", device.did, device.model)
@@ -477,3 +546,63 @@ class CameraService:
         
         if self._on_status_changed:
             await self._on_status_changed(did, status)
+
+    async def _delayed_auto_start_async(self) -> None:
+        """Auto-start cameras after a brief delay for service stability."""
+        try:
+            # Wait for service to be fully ready
+            await asyncio.sleep(2)
+            await self._load_and_start_active_cameras_async()
+        except Exception as e:
+            _LOGGER.error("Error in delayed auto-start: %s", e)
+
+    async def _wait_for_stream_ready_async(
+        self,
+        did: str,
+        channel: int,
+        timeout: float = 10.0,
+    ) -> bool:
+        """Wait for RTSP stream to be publishing to MediaMTX.
+        
+        This prevents the "frozen first frame" issue by ensuring the stream
+        is actually ready before returning from start_camera.
+        
+        Args:
+            did: Device ID
+            channel: Camera channel
+            timeout: Maximum time to wait in seconds
+            
+        Returns:
+            True if stream is ready, False if timeout
+        """
+        import aiohttp
+        
+        stream_key = f"{did}_{channel}"
+        rtsp_path = f"camera/{did}/{channel}"
+        mediamtx_api = "http://localhost:9997/v3/paths/list"
+        
+        start_time = asyncio.get_event_loop().time()
+        
+        _LOGGER.info("Waiting for RTSP stream %s to be ready...", stream_key)
+        
+        while (asyncio.get_event_loop().time() - start_time) < timeout:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(mediamtx_api, timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            paths = data.get("items", [])
+                            
+                            for path_info in paths:
+                                if path_info.get("name") == rtsp_path:
+                                    # Check if someone is publishing
+                                    if path_info.get("ready", False):
+                                        _LOGGER.info("RTSP stream %s is ready", stream_key)
+                                        return True
+            except Exception as e:
+                _LOGGER.debug("Error checking MediaMTX: %s", e)
+            
+            await asyncio.sleep(0.5)
+        
+        _LOGGER.warning("Timeout waiting for RTSP stream %s to be ready", stream_key)
+        return False
