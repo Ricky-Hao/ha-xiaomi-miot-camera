@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.14] - 2026-01-12
+
+### Added
+- **WebRTC support**: Enable MediaMTX WebRTC server on port 8889 for instant low-latency streaming
+- **HLS always-on**: Enable MediaMTX HLS server on port 8888 with `hlsAlwaysRemux` for pre-generated HLS segments
+- **Camera WebRTC integration**: Implement `async_handle_web_rtc_offer()` using MediaMTX WHEP protocol
+
+### Changed
+- **Instant camera playback**: WebRTC streams directly from MediaMTX without HA stream component transcoding
+- **Fallback to HLS**: If WebRTC unavailable, uses HLS which is always ready from MediaMTX
+
+### New Ports
+- `8888/tcp`: HLS streaming (always-on, pre-generated segments)
+- `8889/tcp`: WebRTC streaming (WHEP protocol, lowest latency)
+
+### Technical
+- MediaMTX now provides: RTSP (8554), HLS (8888), WebRTC (8889), API (9997)
+- Camera entity uses `StreamType.WEB_RTC` as frontend stream type
+- HLS configured with LL-HLS (Low Latency HLS) for ~1-2s latency
+
 ## [0.4.13] - 2026-01-12
 
 ### Fixed

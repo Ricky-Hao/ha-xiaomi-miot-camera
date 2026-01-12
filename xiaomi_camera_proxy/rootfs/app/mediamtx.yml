@@ -1,5 +1,5 @@
 # MediaMTX configuration for Xiaomi Camera Proxy
-# This RTSP server receives H.264 streams from cameras via FFmpeg publisher
+# This RTSP server receives H.264/H.265 streams from cameras via FFmpeg publisher
 
 ###############################################
 # Global settings
@@ -19,14 +19,25 @@ protocols: [tcp]
 rtspAddress: :8554
 
 ###############################################
-# WebRTC (disabled)
+# WebRTC server - Low latency streaming
 
-webrtc: no
+webrtc: yes
+webrtcAddress: :8889
+webrtcAllowOrigin: '*'
+webrtcICEServers2: []
 
 ###############################################
-# HLS (disabled)
+# HLS server - Always-on for instant playback
 
-hls: no
+hls: yes
+hlsAddress: :8888
+hlsAlwaysRemux: yes  # Keep HLS segments ready even without viewers
+hlsVariant: lowLatency  # Low latency HLS (LL-HLS)
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+hlsSegmentMaxSize: 50M
+hlsAllowOrigin: '*'
 
 ###############################################
 # API
@@ -50,7 +61,9 @@ pathDefaults:
 ###############################################
 # Paths
 # Camera streams published to /camera/{did}/{channel}
-# Example: rtsp://localhost:8554/camera/123456789/0
+# RTSP: rtsp://localhost:8554/camera/123456789/0
+# WebRTC: http://localhost:8889/camera/123456789/0/whep
+# HLS: http://localhost:8888/camera/123456789/0/index.m3u8
 
 paths:
   ~^camera/(.+)/(\d+)$:

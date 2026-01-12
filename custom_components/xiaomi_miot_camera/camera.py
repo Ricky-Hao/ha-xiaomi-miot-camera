@@ -7,11 +7,13 @@ import asyncio
 import logging
 from typing import Any
 
+import aiohttp
 from aiohttp import web
 
 from homeassistant.components.camera import (
     Camera,
     CameraEntityFeature,
+    StreamType,
     async_get_still_stream,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -24,6 +26,9 @@ from .const import DOMAIN, DEFAULT_FRAME_INTERVAL
 from .coordinator import XiaomiCameraCoordinator, CameraData
 
 _LOGGER = logging.getLogger(__name__)
+
+# MediaMTX WebRTC endpoint (WHEP protocol)
+WEBRTC_BASE_URL = "http://127.0.0.1:8889"
 
 
 async def async_setup_entry(
@@ -58,7 +63,12 @@ class XiaomiMiotCamera(Camera):
     """Xiaomi MIoT Camera entity."""
 
     _attr_has_entity_name = True
-    # Support STREAM feature - RTSP streaming via Camera Proxy Add-on
+    # Support STREAM feature for fallback HLS
+    _attr_supported_features = CameraEntityFeature.STREAM
+    # Prefer WebRTC for instant playback (no HA transcoding)
+    _attr_frontend_stream_type = StreamType.WEB_RTC
+
+    # Native WebRTC support flag
     _attr_supported_features = CameraEntityFeature.STREAM
 
     def __init__(
@@ -87,6 +97,43 @@ class XiaomiMiotCamera(Camera):
 
         # Frame interval in seconds
         self._frame_interval = DEFAULT_FRAME_INTERVAL / 1000.0
+        
+        # WebRTC WHEP endpoint
+        self._whep_url = f"{WEBRTC_BASE_URL}/camera/{self._did}/{self._channel}/whep"
+
+    async def async_handle_web_rtc_offer(self, offer_sdp: str) -> str | None:
+        """Handle WebRTC offer and return answer SDP.
+        
+        Uses MediaMTX's WHEP (WebRTC-HTTP Egress Protocol) endpoint for
+        instant low-latency streaming without HA transcoding.
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self._whep_url,
+                    data=offer_sdp,
+                    headers={
+                        "Content-Type": "application/sdp",
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 201:
+                        answer_sdp = await resp.text()
+                        _LOGGER.debug(
+                            "WebRTC offer/answer exchange successful for camera %s",
+                            self._did
+                        )
+                        return answer_sdp
+                    else:
+                        error = await resp.text()
+                        _LOGGER.error(
+                            "WebRTC WHEP request failed: %s - %s",
+                            resp.status, error
+                        )
+                        return None
+        except Exception as err:
+            _LOGGER.error("WebRTC offer handling failed for camera %s: %s", self._did, err)
+            return None
 
     @property
     def device_info(self) -> DeviceInfo:
