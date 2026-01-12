@@ -53,8 +53,12 @@ ACTIVE_CAMERAS_FILE = CONFIG_PATH / "active_cameras.json"
 class CameraService:
     """Camera service that manages all cameras."""
 
-    def __init__(self):
-        """Initialize camera service."""
+    def __init__(self, video_quality: int = 3):
+        """Initialize camera service.
+        
+        Args:
+            video_quality: Video quality (1=LOW, 3=HIGH, 4/5=experimental)
+        """
         self._oauth_client: Optional[MIoTOAuth2Client] = None
         self._http_client: Optional[MIoTHttpClient] = None
         self._camera_manager: Optional[MIoTCamera] = None
@@ -66,7 +70,7 @@ class CameraService:
         self._device_list: Dict[str, MIoTDeviceInfo] = {}
         self._camera_list: Dict[str, MIoTCameraInfo] = {}
         self._active_cameras: Dict[str, MIoTCameraInstance] = {}
-        self._camera_qualities: Dict[str, int] = {}  # Track quality per camera
+        self._default_video_quality: int = video_quality  # Default quality from config
 
         # Snapshots cache: {did_channel: bytes}
         self._snapshots: Dict[str, bytes] = {}
@@ -269,14 +273,14 @@ class CameraService:
         self,
         did: str,
         pin_code: Optional[str] = None,
-        quality: int = 3,  # 1=LOW, 3=HIGH, 4/5=experimental
         enable_audio: bool = False,
     ) -> None:
         """Start streaming a camera.
         
+        Uses the video_quality from Add-on configuration.
+        
         Behavior:
-        - If camera is already active with SAME quality: returns immediately (0 delay)
-        - If camera is already active with DIFFERENT quality: restarts with new quality
+        - If camera is already active: returns immediately (0 delay)
         - If camera is not active: starts camera and waits for stream to be ready
         
         This ensures WebRTC stream is ready when user opens camera.
@@ -291,28 +295,19 @@ class CameraService:
         
         # Check if camera is already active
         if did in self._active_cameras:
-            # Check if quality has changed
-            current_quality = self._camera_qualities.get(did)
-            if current_quality != quality:
-                _LOGGER.info("Camera %s quality changed from %s to %d, restarting...", 
-                            did, current_quality, quality)
-                await self.stop_camera_async(did)
-                # Continue to start with new quality
+            # Check if stream is ready
+            stream_ready = await self._check_stream_ready_async(did, 0)
+            if stream_ready:
+                _LOGGER.info("Camera %s already streaming, returning immediately", did)
+                return
             else:
-                # Same quality, check if stream is ready
-                stream_ready = await self._check_stream_ready_async(did, 0)
-                if stream_ready:
-                    _LOGGER.info("Camera %s already streaming with quality=%d, returning immediately", 
-                                did, quality)
-                    return
-                else:
-                    _LOGGER.info("Camera %s active but stream not ready, waiting...", did)
-                    # Wait for stream to be ready
-                    if self._rtsp_streamer:
-                        for channel in range(camera_info.channel_count):
-                            await self._wait_for_stream_ready_async(did, channel)
-                    _LOGGER.info("Camera %s stream now ready", did)
-                    return
+                _LOGGER.info("Camera %s active but stream not ready, waiting...", did)
+                # Wait for stream to be ready
+                if self._rtsp_streamer:
+                    for channel in range(camera_info.channel_count):
+                        await self._wait_for_stream_ready_async(did, channel)
+                _LOGGER.info("Camera %s stream now ready", did)
+                return
         
         # Create camera instance (first time)
         _LOGGER.info("Starting new camera: %s", did)
@@ -347,12 +342,10 @@ class CameraService:
                 callback=self._on_camera_status_changed,
             )
         
-        # Start streaming
-        # Use a list of QualityValue to allow any integer (including experimental 4/5)
-        # TESTING: Force quality=4 to test if camera supports higher quality
-        quality = 4  # FORCE TEST
+        # Start streaming with configured quality
+        quality = self._default_video_quality
         quality_list = [QualityValue(quality) for _ in range(camera_info.channel_count)]
-        _LOGGER.info("Starting camera %s with quality=%d (list=%s) [FORCED FOR TESTING]", did, quality, quality_list)
+        _LOGGER.info("Starting camera %s with quality=%d (list=%s)", did, quality, quality_list)
         
         await self._camera_manager.start_camera_async(
             did=did,
@@ -361,9 +354,6 @@ class CameraService:
             enable_audio=enable_audio,
             enable_reconnect=True,
         )
-        
-        # Record the quality for this camera
-        self._camera_qualities[did] = quality
         
         # Save active cameras for auto-restart on Add-on reboot
         await self._save_active_cameras_async()
@@ -403,10 +393,6 @@ class CameraService:
                     await self._rtsp_streamer.stop_stream(did, channel)
             
             del self._active_cameras[did]
-            
-            # Clear quality record
-            if did in self._camera_qualities:
-                del self._camera_qualities[did]
             
             # Update saved active cameras
             await self._save_active_cameras_async()

@@ -26,9 +26,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .miot.camera_backend import CameraBackend, check_proxy_available
-from .miot.types import MIoTOauthInfo, MIoTCameraInfo, MIoTCameraStatus, MIoTCameraVideoQuality
+from .miot.types import MIoTOauthInfo, MIoTCameraInfo, MIoTCameraStatus
 
-from .const import DOMAIN, DEFAULT_VIDEO_QUALITY, CONF_VIDEO_QUALITY
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
     
     All camera logic is delegated to the Camera Proxy Add-on.
     This coordinator just manages the connection and provides data to entities.
+    Video quality is configured in Add-on settings, not in the integration.
     """
 
     def __init__(
@@ -58,7 +59,6 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
         oauth_info: dict,
         selected_cameras: List[str],
         proxy_url: Optional[str] = None,
-        video_quality: int = DEFAULT_VIDEO_QUALITY,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -70,7 +70,6 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
         self._oauth_info = MIoTOauthInfo.model_validate(oauth_info)
         self._selected_cameras = selected_cameras
         self._proxy_url = proxy_url or DEFAULT_PROXY_URL
-        self._video_quality = video_quality
 
         self._backend: Optional[CameraBackend] = None
         self._cameras: Dict[str, CameraData] = {}
@@ -85,11 +84,6 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
     def proxy_url(self) -> str:
         """Return proxy URL."""
         return self._proxy_url
-
-    @property
-    def video_quality(self) -> int:
-        """Return video quality setting."""
-        return self._video_quality
 
     async def async_initialize(self) -> None:
         """Initialize the coordinator."""
@@ -140,11 +134,8 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
 
         try:
             # Start camera via Add-on (ensures WebRTC stream is ready)
-            _LOGGER.info("Starting camera %s with quality=%d", did, self._video_quality)
-            await self._backend.start_camera_async(
-                did=did,
-                quality=self._video_quality,
-            )
+            # Video quality is configured in Add-on settings
+            await self._backend.start_camera_async(did=did)
             
             self._cameras[did].is_streaming = True
             self._cameras[did].status = MIoTCameraStatus.CONNECTED

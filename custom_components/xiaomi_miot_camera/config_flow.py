@@ -31,13 +31,7 @@ from .const import (
     CONF_CLOUD_SERVER,
     CONF_OAUTH_INFO,
     CONF_SELECTED_CAMERAS,
-    CONF_VIDEO_QUALITY,
     CLOUD_SERVER,
-    DEFAULT_VIDEO_QUALITY,
-    VIDEO_QUALITY_LOW,
-    VIDEO_QUALITY_HIGH,
-    VIDEO_QUALITY_SUPER,
-    VIDEO_QUALITY_ULTRA,
 )
 from .miot.proxy_client import CameraProxyHttpClient
 
@@ -45,14 +39,6 @@ _LOGGER = logging.getLogger(__name__)
 
 # Default Add-on URL
 DEFAULT_PROXY_URL = "http://127.0.0.1:8765"
-
-# Video quality options for selector (keys must be int for proper handling)
-VIDEO_QUALITY_OPTIONS = {
-    VIDEO_QUALITY_LOW: "Low (1)",
-    VIDEO_QUALITY_HIGH: "High (3)",
-    VIDEO_QUALITY_SUPER: "Super (4) - Experimental",
-    VIDEO_QUALITY_ULTRA: "Ultra (5) - Experimental",
-}
 
 
 async def check_addon_available() -> bool:
@@ -323,11 +309,7 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
         
         if user_input is not None and not errors:
             new_selected = user_input.get(CONF_SELECTED_CAMERAS, [])
-            # Ensure quality is int (voluptuous may return it as-is or string)
-            raw_quality = user_input.get(CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY)
-            new_quality = int(raw_quality) if raw_quality is not None else DEFAULT_VIDEO_QUALITY
-            _LOGGER.info("Options flow: user submitted, new_selected = %s, quality = %d (raw=%s, type=%s)", 
-                        new_selected, new_quality, raw_quality, type(raw_quality))
+            _LOGGER.info("Options flow: user submitted, new_selected = %s", new_selected)
             
             # Remove entities and devices for cameras that are no longer selected
             await self._cleanup_removed_cameras(new_selected)
@@ -340,7 +322,6 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
             self.hass.config_entries.async_update_entry(
                 self._config_entry,
                 data=new_data,
-                options={CONF_VIDEO_QUALITY: new_quality},
             )
             
             # Reload the integration to apply changes
@@ -350,7 +331,6 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data={})
 
         current_selected = self._config_entry.data.get(CONF_SELECTED_CAMERAS, [])
-        current_quality = self._config_entry.options.get(CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY)
 
         return self.async_show_form(
             step_id="init",
@@ -359,10 +339,6 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
                     CONF_SELECTED_CAMERAS,
                     default=current_selected,
                 ): cv.multi_select(camera_options) if camera_options else str,
-                vol.Optional(
-                    CONF_VIDEO_QUALITY,
-                    default=current_quality,
-                ): vol.In(VIDEO_QUALITY_OPTIONS),
             }),
             errors=errors,
         )

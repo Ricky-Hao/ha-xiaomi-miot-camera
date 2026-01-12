@@ -37,10 +37,9 @@
         "step": {
             "init": {
                 "title": "小米 MIoT 摄像头选项",
-                "description": "选择要添加到 Home Assistant 的摄像头。下方显示所有已发现的摄像头。\n\n**视频质量：**\n- 低 (1)：较低分辨率，占用带宽少\n- 高 (3)：标准高清画质\n- 超高 (4)：实验性 - 可能不支持所有摄像头\n- 极高 (5)：实验性 - 可能不支持所有摄像头",
+                "description": "选择要添加到 Home Assistant 的摄像头。\n\n**注意：** 视频质量现在在插件设置中配置。",
                 "data": {
-                    "selected_cameras": "已选摄像头",
-                    "video_quality": "视频质量"
+                    "selected_cameras": "已选摄像头"
                 }
             }
         },

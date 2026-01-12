@@ -45,10 +45,9 @@
         "step": {
             "init": {
                 "title": "Xiaomi MIoT Camera Options",
-                "description": "Configure your Xiaomi MIoT Camera integration.\n\n**Video Quality:**\n- Low (1): Lower resolution, less bandwidth\n- High (3): Standard HD quality\n- Super (4): Experimental - may not work on all cameras\n- Ultra (5): Experimental - may not work on all cameras",
+                "description": "Configure your Xiaomi MIoT Camera integration.\n\n**Note:** Video quality is now configured in the Add-on settings.",
                 "data": {
-                    "selected_cameras": "Selected Cameras",
-                    "video_quality": "Video Quality"
+                    "selected_cameras": "Selected Cameras"
                 }
             }
         }

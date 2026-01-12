@@ -11,7 +11,7 @@ import asyncio
 import logging
 from typing import Callable, Coroutine, Dict, List, Optional, Union
 
-from .types import MIoTCameraInfo, MIoTCameraStatus, MIoTCameraVideoQuality
+from .types import MIoTCameraInfo, MIoTCameraStatus
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -92,17 +92,18 @@ class CameraBackend:
         self,
         did: str,
         pin_code: Optional[str] = None,
-        quality: int = 3,  # 1=LOW, 3=HIGH, 4/5=experimental
         enable_audio: bool = False,
     ) -> bool:
-        """Start camera streaming. Returns success status."""
+        """Start camera streaming. Returns success status.
+        
+        Note: Video quality is configured in Add-on settings.
+        """
         if not self._client:
             raise RuntimeError("Backend not initialized")
         
         return await self._client.start_camera_async(
             did=did,
             pin_code=pin_code,
-            quality=quality,
             enable_audio=enable_audio,
         )
 

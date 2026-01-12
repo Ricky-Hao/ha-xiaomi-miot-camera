@@ -53,7 +53,9 @@ Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (exte
 ## Configuration
 
 ```yaml
-log_level: info  # debug, info, warning, error
+log_level: info      # debug, info, warning, error
+transcode_h264: true # Transcode H.265 to H.264 for browser compatibility
+video_quality: 3     # Video quality: 1=LOW, 3=HIGH, 4/5=experimental
 ```
 
 ### Options
@@ -61,6 +63,14 @@ log_level: info  # debug, info, warning, error
 | Option | Description | Default |
 |--------|-------------|---------|
 | `log_level` | Logging verbosity | `info` |
+| `transcode_h264` | Transcode H.265 to H.264 for browser WebRTC | `true` |
+| `video_quality` | Video quality (1=LOW, 3=HIGH, 4/5=experimental) | `3` |
+
+### Video Quality
+
+- **1 (LOW)**: Lower resolution, less bandwidth
+- **3 (HIGH)**: Standard HD quality (recommended)
+- **4-5 (Experimental)**: May provide higher quality on some cameras, but not officially supported
 
 ## Ports
 

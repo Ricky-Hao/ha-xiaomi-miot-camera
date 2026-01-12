@@ -5,10 +5,12 @@ set -e
 CONFIG_PATH=/data/options.json
 LOG_LEVEL=$(jq -r '.log_level // "info"' $CONFIG_PATH)
 TRANSCODE_H264=$(jq -r '.transcode_h264 // true' $CONFIG_PATH)
+VIDEO_QUALITY=$(jq -r '.video_quality // 3' $CONFIG_PATH)
 
 echo "Starting Xiaomi MIoT Camera Proxy..."
 echo "Log level: ${LOG_LEVEL}"
 echo "Transcode H.265→H.264: ${TRANSCODE_H264}"
+echo "Video quality: ${VIDEO_QUALITY} (1=LOW, 3=HIGH, 4/5=experimental)"
 echo ""
 echo "Architecture: Direct WebRTC streaming via MediaMTX"
 echo "- WebRTC (WHEP): http://<addon-host>:8889/camera/{did}/{channel}/whep"
@@ -57,4 +59,4 @@ echo "MediaMTX is ready (RTSP on 8554, WebRTC on 8889)"
 
 # Start the proxy server
 cd /app
-exec python3 -m camera_proxy --log-level "${LOG_LEVEL}" ${TRANSCODE_ARG}
+exec python3 -m camera_proxy --log-level "${LOG_LEVEL}" ${TRANSCODE_ARG} --video-quality "${VIDEO_QUALITY}"

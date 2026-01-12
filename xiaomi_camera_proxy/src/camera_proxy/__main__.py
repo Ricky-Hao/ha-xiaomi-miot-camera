@@ -37,6 +37,12 @@ def main():
         action="store_true",
         help="Disable H.265 to H.264 transcoding (use H.265 passthrough)",
     )
+    parser.add_argument(
+        "--video-quality",
+        type=int,
+        default=3,
+        help="Video quality (1=LOW, 3=HIGH, 4/5=experimental, default: 3)",
+    )
     args = parser.parse_args()
     
     # Handle transcode option
@@ -51,10 +57,16 @@ def main():
 
     logger = logging.getLogger(__name__)
     logger.info("Starting Xiaomi MIoT Camera Proxy v%s (using miot_kit)", __version__)
+    logger.info("Video quality: %d (1=LOW, 3=HIGH, 4/5=experimental)", args.video_quality)
 
     # Run server
     async def run():
-        server = CameraProxyServer(host=args.host, port=args.port, transcode_h264=transcode_h264)
+        server = CameraProxyServer(
+            host=args.host, 
+            port=args.port, 
+            transcode_h264=transcode_h264,
+            video_quality=args.video_quality,
+        )
         await server.start_async()
         try:
             while True:
