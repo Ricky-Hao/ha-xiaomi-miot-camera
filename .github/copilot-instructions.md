@@ -215,3 +215,41 @@ Examples:
 - `fix: Use correct API host for camera library`
 - `chore: Bump add-on version to 0.2.2`
 - `docs: Update installation guide`
+## Git Configuration
+
+### Commit Author Settings
+
+**⚠️ IMPORTANT**: GitHub blocks pushes that expose private email addresses. Always use the GitHub noreply email format.
+
+**Repository owner**: Hao (Ricky-Hao)
+**Noreply email**: `14084342+Ricky-Hao@users.noreply.github.com`
+
+### Before Committing
+
+Always use environment variables to set author/committer when creating commits:
+
+```bash
+GIT_COMMITTER_NAME="Hao" \
+GIT_COMMITTER_EMAIL="14084342+Ricky-Hao@users.noreply.github.com" \
+git commit --author="Hao <14084342+Ricky-Hao@users.noreply.github.com>" -m "message"
+```
+
+Or set global config first:
+```bash
+git config --global user.name "Hao"
+git config --global user.email "14084342+Ricky-Hao@users.noreply.github.com"
+```
+
+### If Push is Rejected (GH007 Error)
+
+If you see `remote: error: GH007: Your push would publish a private email address`:
+
+```bash
+# Fix the last commit with correct author info
+GIT_COMMITTER_NAME="Hao" \
+GIT_COMMITTER_EMAIL="14084342+Ricky-Hao@users.noreply.github.com" \
+git commit --amend --author="Hao <14084342+Ricky-Hao@users.noreply.github.com>" --no-edit
+
+# Then push
+git push --force-with-lease
+```
