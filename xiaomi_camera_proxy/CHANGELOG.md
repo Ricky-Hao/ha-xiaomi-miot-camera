@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.1] - 2026-01-12 (Add-on)
+
+### Fixed
+- **Fix first frame loss**: First frame containing VPS/SPS/PPS is now properly sent to FFmpeg
+- Previously, first frame was used for codec detection but lost before FFmpeg started
+- This caused "PPS id out of range" errors for some cameras
+
+### Changed
+- **Reduce log noise**: FFmpeg log level changed to warning, periodic frame logs reduced to every 500 frames
+- **Simplified code**: Removed redundant logging and unused variables
+
 ## [0.5.0] - 2026-01-12 (Integration + Add-on)
 
 ### Changed - Architecture Refactoring
