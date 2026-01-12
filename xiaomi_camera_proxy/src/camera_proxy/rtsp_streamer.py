@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Copyright (C) 2025 Xiaomi Corporation
 # This software may be used and distributed according to the terms of the Xiaomi Miloco License Agreement.
-"""RTSP streamer - pushes H.264 to mediamtx."""
+"""RTSP streamer - pushes H.264/H.265 to mediamtx."""
 import asyncio
 import logging
 import subprocess
@@ -10,11 +10,70 @@ from typing import Dict, Optional
 _LOGGER = logging.getLogger(__name__)
 
 
+def detect_codec_from_nalu(data: bytes) -> int:
+    """Detect codec from NAL unit header.
+    
+    H.264 NAL unit: [start_code] [nal_unit_type(5 bits)]
+    H.265 NAL unit: [start_code] [nal_unit_type(6 bits) in byte 0, high 6 bits]
+    
+    Returns:
+        4 for H.264, 5 for H.265/HEVC, 0 if unknown
+    """
+    if len(data) < 5:
+        return 0
+    
+    # Find start code position (0x00 0x00 0x01 or 0x00 0x00 0x00 0x01)
+    start_pos = 0
+    if data[0:3] == b'\x00\x00\x01':
+        start_pos = 3
+    elif data[0:4] == b'\x00\x00\x00\x01':
+        start_pos = 4
+    else:
+        # No start code found, might be raw NAL
+        start_pos = 0
+    
+    if start_pos >= len(data):
+        return 0
+    
+    nal_byte = data[start_pos]
+    
+    # H.264: forbidden_zero_bit(1) + nal_ref_idc(2) + nal_unit_type(5)
+    # NAL types 1-23 are valid for H.264
+    h264_type = nal_byte & 0x1F
+    
+    # H.265: forbidden_zero_bit(1) + nal_unit_type(6) + nuh_layer_id(6, in next byte)
+    # NAL types are in bits 1-6 (shift right 1, mask 0x3F)
+    h265_type = (nal_byte >> 1) & 0x3F
+    
+    # Heuristic: check if it looks more like H.264 or H.265
+    # H.264 common types: 1 (P), 5 (IDR), 6 (SEI), 7 (SPS), 8 (PPS)
+    # H.265 common types: 1 (P), 19-20 (IDR), 32 (VPS), 33 (SPS), 34 (PPS), 39-40 (SEI)
+    
+    # Check for H.265 VPS (32), SPS (33), PPS (34) - unique to H.265
+    if h265_type in (32, 33, 34):
+        return 5  # H.265
+    
+    # Check for H.265 IDR types (19, 20)
+    if h265_type in (19, 20) and h264_type not in (5, 7, 8):
+        return 5  # H.265
+    
+    # Check for H.264 SPS (7) or PPS (8) - these values would be unusual in H.265
+    if h264_type in (7, 8) and nal_byte & 0x60 != 0:  # nal_ref_idc != 0
+        return 4  # H.264
+    
+    # If first byte has high bits set (nal_ref_idc), likely H.264
+    if nal_byte & 0x60:  # bits 5-6 set
+        return 4  # H.264
+    
+    # Default to H.265 for modern cameras
+    return 5
+
+
 class RTSPStreamer:
-    """Push H.264 streams to mediamtx RTSP server.
+    """Push H.264/H.265 streams to mediamtx RTSP server.
     
     Each camera gets its own ffmpeg process that:
-    1. Receives raw H.264 NAL units via stdin
+    1. Receives raw H.264/H.265 NAL units via stdin
     2. Remuxes to RTSP format (no transcoding!)
     3. Publishes to mediamtx at rtsp://localhost:8554/camera/{did}/{channel}
     """
@@ -27,6 +86,7 @@ class RTSPStreamer:
         self._error_tasks: Dict[str, asyncio.Task] = {}
         self._frame_counts: Dict[str, int] = {}
         self._stream_configs: Dict[str, dict] = {}  # Store config for restart
+        self._detected_codecs: Dict[str, int] = {}  # Detected codec per stream
 
     def _is_stream_running(self, stream_key: str) -> bool:
         """Check if FFmpeg process is still running."""
@@ -35,27 +95,26 @@ class RTSPStreamer:
         process = self._streamers[stream_key]
         return process.poll() is None
 
-    async def start_stream(self, did: str, channel: int = 0, codec_id: int = 4) -> bool:
-        """Start RTSP stream for a camera.
+    async def start_stream(self, did: str, channel: int = 0, codec_id: int = 0) -> bool:
+        """Prepare RTSP stream for a camera (actual FFmpeg start is deferred).
         
         Args:
             did: Device ID
             channel: Camera channel number
-            codec_id: Video codec (4=H.264, 5=H.265/HEVC)
+            codec_id: Video codec (4=H.264, 5=H.265/HEVC, 0=auto-detect)
             
         Returns:
-            True if started successfully
+            True if prepared successfully
         """
         stream_key = f"{did}_{channel}"
         
-        # Store config for later restart
+        # Store config - FFmpeg will start when first frame arrives
         self._stream_configs[stream_key] = {"codec_id": codec_id}
+        self._stream_queues[stream_key] = asyncio.Queue(maxsize=100)
+        self._frame_counts[stream_key] = 0
         
-        if self._is_stream_running(stream_key):
-            _LOGGER.debug("Stream already running: %s", stream_key)
-            return True
-
-        return await self._start_ffmpeg(stream_key, codec_id)
+        _LOGGER.info("Prepared RTSP stream for %s (codec will be auto-detected)", stream_key)
+        return True
 
     async def _start_ffmpeg(self, stream_key: str, codec_id: int) -> bool:
         """Start FFmpeg process for streaming."""
@@ -168,34 +227,47 @@ class RTSPStreamer:
                 process.kill()
             del self._streamers[stream_key]
         
-        # Cleanup queue
+        # Cleanup
         if stream_key in self._stream_queues:
             del self._stream_queues[stream_key]
-        
         if stream_key in self._frame_counts:
             del self._frame_counts[stream_key]
+        if stream_key in self._stream_configs:
+            del self._stream_configs[stream_key]
+        if stream_key in self._detected_codecs:
+            del self._detected_codecs[stream_key]
         
         _LOGGER.info("Stopped RTSP stream: %s", stream_key)
 
     async def push_frame(self, did: str, frame_data: bytes, channel: int = 0):
-        """Push H.264 frame to stream.
+        """Push H.264/H.265 frame to stream.
         
         Args:
             did: Device ID
-            frame_data: Raw H.264 NAL unit
+            frame_data: Raw H.264/H.265 NAL unit
             channel: Camera channel
         """
         stream_key = f"{did}_{channel}"
         
-        # Check if FFmpeg process is still running, restart if needed
-        if not self._is_stream_running(stream_key):
-            _LOGGER.warning("FFmpeg process not running for %s, restarting...", stream_key)
-            config = self._stream_configs.get(stream_key, {"codec_id": 4})
-            await self._start_ffmpeg(stream_key, config["codec_id"])
-        
         if stream_key not in self._stream_queues:
             _LOGGER.warning("No stream queue for %s, frame dropped", stream_key)
             return
+        
+        # Auto-detect codec on first frame
+        if stream_key not in self._detected_codecs:
+            detected = detect_codec_from_nalu(frame_data)
+            if detected == 0:
+                detected = 5  # Default to H.265 for modern cameras
+            self._detected_codecs[stream_key] = detected
+            codec_name = "H.265/HEVC" if detected == 5 else "H.264"
+            _LOGGER.info("Auto-detected codec for %s: %s (codec_id=%d)", 
+                        stream_key, codec_name, detected)
+        
+        # Start FFmpeg if not running (deferred start)
+        if not self._is_stream_running(stream_key):
+            codec_id = self._detected_codecs.get(stream_key, 5)
+            _LOGGER.info("Starting FFmpeg for %s with codec_id=%d", stream_key, codec_id)
+            await self._start_ffmpeg(stream_key, codec_id)
         
         # Count frames
         self._frame_counts[stream_key] = self._frame_counts.get(stream_key, 0) + 1
