@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.15] - 2026-01-12
+
+### Changed
+- **WebRTC only**: Disable HLS, use WebRTC exclusively for lowest latency
+- **Removed port 8888**: No longer needed without HLS
+
+### Simplified
+- MediaMTX now provides: RTSP (8554), WebRTC (8889), API (9997)
+- Less resource usage without HLS segment generation
+
 ## [0.4.14] - 2026-01-12
 
 ### Added

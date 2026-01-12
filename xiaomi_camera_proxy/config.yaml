@@ -1,5 +1,5 @@
 name: Xiaomi MIoT Camera Proxy
-version: "0.4.14"
+version: "0.4.15"
 slug: xiaomi_camera_proxy
 description: Camera streaming proxy for Xiaomi MIoT cameras (uses miot_kit for RTSP streaming)
 url: https://github.com/Ricky-Hao/ha-xiaomi-miot-camera
@@ -13,12 +13,10 @@ host_network: true
 ports:
   8765/tcp: 8765
   8554/tcp: 8554
-  8888/tcp: 8888
   8889/tcp: 8889
 ports_description:
   8765/tcp: HTTP/WebSocket API
   8554/tcp: RTSP streaming
-  8888/tcp: HLS streaming (always-on)
   8889/tcp: WebRTC streaming (low latency)
 map:
   - config:rw

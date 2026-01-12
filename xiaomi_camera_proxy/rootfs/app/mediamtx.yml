@@ -27,17 +27,9 @@ webrtcAllowOrigin: '*'
 webrtcICEServers2: []
 
 ###############################################
-# HLS server - Always-on for instant playback
+# HLS (disabled - using WebRTC instead)
 
-hls: yes
-hlsAddress: :8888
-hlsAlwaysRemux: yes  # Keep HLS segments ready even without viewers
-hlsVariant: lowLatency  # Low latency HLS (LL-HLS)
-hlsSegmentCount: 7
-hlsSegmentDuration: 1s
-hlsPartDuration: 200ms
-hlsSegmentMaxSize: 50M
-hlsAllowOrigin: '*'
+hls: no
 
 ###############################################
 # API
@@ -63,7 +55,6 @@ pathDefaults:
 # Camera streams published to /camera/{did}/{channel}
 # RTSP: rtsp://localhost:8554/camera/123456789/0
 # WebRTC: http://localhost:8889/camera/123456789/0/whep
-# HLS: http://localhost:8888/camera/123456789/0/index.m3u8
 
 paths:
   ~^camera/(.+)/(\d+)$:
