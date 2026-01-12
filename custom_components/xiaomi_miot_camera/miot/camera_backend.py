@@ -46,13 +46,15 @@ class CameraBackend:
         
         self._client = CameraProxyHttpClient(proxy_url=self._proxy_url)
         
-        # Set tokens in the Add-on
-        await self._client.set_tokens_async(
-            cloud_server=cloud_server,
-            access_token=access_token,
-            refresh_token=refresh_token,
-            expires_ts=expires_ts,
-        )
+        # Note: Add-on manages tokens via OAuth callback or saved tokens file.
+        # Only set tokens if we have real tokens (not "managed_by_addon" placeholder)
+        if access_token and access_token != "managed_by_addon":
+            await self._client.set_tokens_async(
+                cloud_server=cloud_server,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                expires_ts=expires_ts,
+            )
         
         # Get info to return version
         info = await self._client.get_info_async()
