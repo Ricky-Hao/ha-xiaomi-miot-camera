@@ -26,8 +26,8 @@ webrtc: yes
 webrtcAddress: :8889
 webrtcEncryption: no
 webrtcAllowOrigin: '*'
-webrtcICEServers2:
-  - url: stun:gd.rickyhao.com:3478
+# ICE servers not needed for local network access
+# Add STUN/TURN servers if accessing across NAT
 
 ###############################################
 # HLS - DISABLED

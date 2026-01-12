@@ -437,3 +437,8 @@ Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (exte
 
 ### Changed
 - Use custom STUN server (gd.rickyhao.com:3478)
+
+## [0.6.7] - 2026-01-12
+
+### Changed
+- Remove ICE server config - not needed for local network access
