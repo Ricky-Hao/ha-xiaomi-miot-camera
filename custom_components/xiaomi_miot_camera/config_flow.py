@@ -21,6 +21,8 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr
 
 from .const import (
     DOMAIN,
@@ -292,9 +294,14 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
             errors["base"] = "cannot_connect"
         
         if user_input is not None and not errors:
+            new_selected = user_input.get(CONF_SELECTED_CAMERAS, [])
+            
+            # Remove entities and devices for cameras that are no longer selected
+            await self._cleanup_removed_cameras(new_selected)
+            
             # Update config entry data with new selection
             new_data = dict(self._config_entry.data)
-            new_data[CONF_SELECTED_CAMERAS] = user_input.get(CONF_SELECTED_CAMERAS, [])
+            new_data[CONF_SELECTED_CAMERAS] = new_selected
             
             self.hass.config_entries.async_update_entry(
                 self._config_entry,
@@ -318,3 +325,56 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
             }),
             errors=errors,
         )
+
+    async def _cleanup_removed_cameras(self, new_selected: list[str]) -> None:
+        """Remove entities and devices for cameras that are no longer selected."""
+        entity_registry = er.async_get(self.hass)
+        device_registry = dr.async_get(self.hass)
+        
+        # Find all entities for this config entry
+        entities_to_remove = []
+        devices_to_check = set()
+        
+        for entity_entry in er.async_entries_for_config_entry(
+            entity_registry, self._config_entry.entry_id
+        ):
+            # Entity unique_id format is "{did}_{channel}"
+            unique_id = entity_entry.unique_id
+            if not unique_id:
+                continue
+                
+            # Extract did from unique_id (format: "did_channel")
+            # did is typically a number, channel is 0, 1, etc.
+            parts = unique_id.rsplit("_", 1)
+            did = parts[0] if len(parts) == 2 else unique_id
+            
+            _LOGGER.debug("Checking entity %s with did %s, new_selected: %s", 
+                        entity_entry.entity_id, did, new_selected)
+            
+            # If this camera is no longer selected, mark for removal
+            if did not in new_selected:
+                entities_to_remove.append(entity_entry.entity_id)
+                if entity_entry.device_id:
+                    devices_to_check.add(entity_entry.device_id)
+                _LOGGER.info("Will remove entity %s (camera %s no longer selected)", 
+                           entity_entry.entity_id, did)
+        
+        # Remove the entities first
+        for entity_id in entities_to_remove:
+            _LOGGER.info("Removing entity: %s", entity_id)
+            entity_registry.async_remove(entity_id)
+        
+        # Check and remove devices that have no remaining entities
+        for device_id in devices_to_check:
+            device_entry = device_registry.async_get(device_id)
+            if not device_entry:
+                continue
+            
+            # Check if device has any remaining entities
+            remaining_entities = er.async_entries_for_device(
+                entity_registry, device_id, include_disabled_entities=True
+            )
+            
+            if not remaining_entities:
+                _LOGGER.info("Removing device: %s", device_entry.name)
+                device_registry.async_remove_device(device_id)
