@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1] - 2026-01-12
+
+### Changed
+- Remove unused code from Integration (common.py, error.py, LICENSE)
+- Simplify types.py (keep only camera-related types)
+- Clean up unused imports and constants
+- Fix server import in __main__.py
+
 ## [0.4.0] - 2026-01-12
 
 ### Major Refactoring

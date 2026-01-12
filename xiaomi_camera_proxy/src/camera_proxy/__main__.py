@@ -8,7 +8,7 @@ import logging
 import sys
 
 from . import __version__
-from .server_v2 import CameraProxyServer
+from .server import CameraProxyServer
 
 
 def main():
