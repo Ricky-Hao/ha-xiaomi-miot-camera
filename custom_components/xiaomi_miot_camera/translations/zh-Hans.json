@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "小米 MIoT 摄像头设置",
-                "description": "点击提交开始设置小米摄像头。\n\n注意：此集成需要安装并运行"Xiaomi Camera Proxy"插件。",
+                "description": "点击提交开始设置小米摄像头。\n\n注意：此集成需要安装并运行 Xiaomi Camera Proxy 插件。",
                 "data": {}
             },
             "auth": {
