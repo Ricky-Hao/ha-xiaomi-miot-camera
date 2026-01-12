@@ -1,5 +1,5 @@
 # MediaMTX configuration for Xiaomi Camera Proxy
-# This RTSP server receives H.264/H.265 streams from cameras via FFmpeg publisher
+# Lightweight RTSP server - WebRTC is handled by HA go2rtc
 
 ###############################################
 # Global settings
@@ -12,34 +12,26 @@ readTimeout: 10s
 writeTimeout: 10s
 
 ###############################################
-# RTSP server
+# RTSP server - exposed to HA go2rtc
 
 rtsp: yes
 protocols: [tcp]
 rtspAddress: :8554
 
 ###############################################
-# WebRTC server - Low latency streaming
+# WebRTC - DISABLED (use HA go2rtc instead)
 
-webrtc: yes
-webrtcAddress: :8889
-webrtcAllowOrigin: '*'
-# Use Google's public STUN servers for NAT traversal
-webrtcICEServers2:
-  - urls:
-    - stun:stun.l.google.com:19302
-    - stun:stun1.l.google.com:19302
+webrtc: no
 
 ###############################################
-# HLS (disabled - using WebRTC instead)
+# HLS - DISABLED
 
 hls: no
 
 ###############################################
-# API
+# API - DISABLED (not needed)
 
-api: yes
-apiAddress: :9997
+api: no
 
 ###############################################
 # Path defaults
@@ -57,8 +49,8 @@ pathDefaults:
 ###############################################
 # Paths
 # Camera streams published to /camera/{did}/{channel}
-# RTSP: rtsp://localhost:8554/camera/123456789/0
-# WebRTC: http://localhost:8889/camera/123456789/0/whep
+# RTSP: rtsp://localhost:8554/camera/{did}/{channel}
+# Use HA go2rtc to convert to WebRTC
 
 paths:
   ~^camera/(.+)/(\d+)$:

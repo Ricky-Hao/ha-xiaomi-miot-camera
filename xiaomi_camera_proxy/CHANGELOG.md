@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.0] - 2026-01-12 (Integration + Add-on)
+
+### Changed - Architecture Refactoring
+- **Switch to go2rtc-based WebRTC streaming**: Major architecture simplification
+- **Add-on changes**:
+  - MediaMTX now only serves RTSP (WebRTC disabled)
+  - RTSP streams available at `rtsp://<host>:8554/camera/{did}/{channel}`
+  - Removed port 8889 (WebRTC), kept only 8765 (API) and 8554 (RTSP)
+- **Integration changes**:
+  - `stream_source()` now returns RTSP URL instead of None
+  - Removed all custom WHEP/WebRTC code
+  - HA's native go2rtc handles WebRTC conversion automatically
+- **Benefits**:
+  - Simpler architecture with fewer moving parts
+  - Leverages HA's battle-tested go2rtc for WebRTC
+  - Better codec compatibility (go2rtc handles H.265/H.264 transcoding)
+  - Improved reliability and maintainability
+
 ## [0.4.21] - 2026-01-12 (Add-on)
 
 ### Fixed

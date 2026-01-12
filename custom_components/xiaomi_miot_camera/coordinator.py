@@ -152,6 +152,24 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
         """Start streaming a camera (public method for entities to call)."""
         await self._start_camera(did)
 
+    async def async_stop_camera(self, did: str) -> None:
+        """Stop streaming a camera."""
+        if did not in self._cameras:
+            _LOGGER.warning("Camera %s not found", did)
+            return
+        
+        try:
+            if self._backend:
+                await self._backend.stop_camera_async(did)
+            
+            self._cameras[did].is_streaming = False
+            self._cameras[did].status = MIoTCameraStatus.DISCONNECTED
+            
+            _LOGGER.info("Stopped camera %s", did)
+            
+        except Exception as err:
+            _LOGGER.error("Failed to stop camera %s: %s", did, err)
+
     async def async_get_frame(self, did: str, channel: int = 0) -> Optional[bytes]:
         """Get a snapshot frame for a camera."""
         if self._backend:

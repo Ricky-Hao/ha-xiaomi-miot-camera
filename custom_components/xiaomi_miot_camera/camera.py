@@ -1,23 +1,22 @@
 # Copyright (C) 2025 Xiaomi Corporation
 # This software may be used and distributed according to the terms of the Xiaomi Miloco License Agreement.
-"""Camera platform for Xiaomi MIoT Camera integration."""
+"""Camera platform for Xiaomi MIoT Camera integration.
+
+This integration uses HA's native go2rtc for WebRTC streaming:
+- Add-on provides RTSP streams at rtsp://<host>:8554/camera/{did}/{channel}
+- Integration returns RTSP URL via stream_source()
+- HA go2rtc handles WebRTC conversion automatically
+"""
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Any, Callable
+from typing import Any
 
-import aiohttp
 from aiohttp import web
-from webrtc_models import RTCIceCandidateInit
 
 from homeassistant.components.camera import (
     Camera,
     CameraEntityFeature,
-    StreamType,
-    WebRTCAnswer,
-    WebRTCError,
-    WebRTCSendMessage,
     async_get_still_stream,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -31,8 +30,9 @@ from .coordinator import XiaomiCameraCoordinator, CameraData
 
 _LOGGER = logging.getLogger(__name__)
 
-# MediaMTX WebRTC endpoint (WHEP protocol)
-WEBRTC_BASE_URL = "http://127.0.0.1:8889"
+# Add-on RTSP server address
+# When running as HA Add-on with host_network, it's accessible at localhost
+RTSP_BASE_URL = "rtsp://127.0.0.1:8554"
 
 
 async def async_setup_entry(
@@ -64,13 +64,18 @@ async def async_setup_entry(
 
 
 class XiaomiMiotCamera(Camera):
-    """Xiaomi MIoT Camera entity."""
+    """Xiaomi MIoT Camera entity.
+    
+    Streaming architecture:
+    - Add-on runs MediaMTX as RTSP server on port 8554
+    - FFmpeg pushes camera H.265/H.264 streams to MediaMTX
+    - This entity returns RTSP URL via stream_source()
+    - HA's go2rtc converts RTSP to WebRTC for low-latency playback
+    """
 
     _attr_has_entity_name = True
-    # Support STREAM feature (required for WebRTC)
+    # Support STREAM feature for go2rtc integration
     _attr_supported_features = CameraEntityFeature.STREAM
-    # Use WebRTC for instant playback (no HA transcoding)
-    _attr_frontend_stream_type = StreamType.WEB_RTC
 
     def __init__(
         self,
@@ -96,142 +101,33 @@ class XiaomiMiotCamera(Camera):
         else:
             self._attr_name = self._camera_info.name
 
-        # Frame interval in seconds
+        # Frame interval in seconds (for MJPEG fallback)
         self._frame_interval = DEFAULT_FRAME_INTERVAL / 1000.0
         
-        # WebRTC WHEP endpoint
-        self._whep_url = f"{WEBRTC_BASE_URL}/camera/{self._did}/{self._channel}/whep"
-        
-        # Track active WebRTC sessions
-        self._webrtc_sessions: dict[str, str] = {}  # session_id -> whep_resource_url
+        # RTSP stream URL for go2rtc
+        self._rtsp_url = f"{RTSP_BASE_URL}/camera/{self._did}/{self._channel}"
 
     async def stream_source(self) -> str | None:
-        """Return the stream source.
+        """Return the RTSP stream source for go2rtc.
         
-        This camera only supports WebRTC streaming, not HLS/RTSP.
-        Return None to indicate HLS streaming is not available.
-        Services like play_stream that require HLS will not work.
-        """
-        return None
-
-    async def async_handle_async_webrtc_offer(
-        self, offer_sdp: str, session_id: str, send_message: WebRTCSendMessage
-    ) -> None:
-        """Handle the WebRTC offer and return the answer via callback.
+        HA's go2rtc will:
+        1. Connect to this RTSP URL
+        2. Auto-detect codec (H.265/H.264)
+        3. Convert to WebRTC for browser playback
         
-        Uses MediaMTX's WHEP (WebRTC-HTTP Egress Protocol) endpoint for
-        instant low-latency streaming without HA transcoding.
+        The camera stream is started automatically when needed.
         """
-        # Ensure camera stream is started before attempting WebRTC
+        # Ensure camera stream is started
         if not self._camera_data.is_streaming:
-            _LOGGER.info("Camera %s not streaming, starting it first...", self._did)
+            _LOGGER.info("Starting camera %s for stream access", self._did)
             try:
                 await self._coordinator.async_start_camera(self._did)
-                # Wait a bit for the stream to be ready
-                await asyncio.sleep(1)
             except Exception as err:
                 _LOGGER.error("Failed to start camera %s: %s", self._did, err)
-                send_message(WebRTCError("webrtc_offer_failed", f"Failed to start camera: {err}"))
-                return
+                return None
         
-        # Retry WHEP request a few times as stream may take a moment to be ready
-        max_retries = 3
-        retry_delay = 1.0  # seconds
-        last_error = None
-        
-        for attempt in range(max_retries):
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        self._whep_url,
-                        data=offer_sdp,
-                        headers={
-                            "Content-Type": "application/sdp",
-                        },
-                        timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        if resp.status == 201:
-                            answer_sdp = await resp.text()
-                            # Store the resource URL for later cleanup
-                            resource_url = resp.headers.get("Location")
-                            if resource_url:
-                                self._webrtc_sessions[session_id] = resource_url
-                            _LOGGER.debug(
-                                "WebRTC offer/answer exchange successful for camera %s (session: %s)",
-                                self._did, session_id
-                            )
-                            send_message(WebRTCAnswer(answer_sdp))
-                            return
-                        else:
-                            error = await resp.text()
-                            last_error = f"WHEP error {resp.status}: {error}"
-                            # 400 with "stream doesn't contain any supported codec" means stream not ready
-                            if resp.status == 400 and "codec" in error.lower():
-                                _LOGGER.debug(
-                                    "Stream not ready for camera %s, attempt %d/%d",
-                                    self._did, attempt + 1, max_retries
-                                )
-                                if attempt < max_retries - 1:
-                                    await asyncio.sleep(retry_delay)
-                                    continue
-                            _LOGGER.error(
-                                "WebRTC WHEP request failed: %s - %s",
-                                resp.status, error
-                            )
-            except asyncio.TimeoutError:
-                last_error = "Connection timeout"
-                _LOGGER.debug("WebRTC offer timeout for camera %s, attempt %d/%d", 
-                             self._did, attempt + 1, max_retries)
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(retry_delay)
-                    continue
-            except Exception as err:
-                last_error = str(err)
-                _LOGGER.error("WebRTC offer handling failed for camera %s: %s", self._did, err)
-                break
-        
-        # All retries failed
-        _LOGGER.error("WebRTC failed for camera %s after %d attempts: %s", 
-                     self._did, max_retries, last_error)
-        send_message(WebRTCError("webrtc_offer_failed", last_error or "Unknown error"))
-
-    async def async_on_webrtc_candidate(
-        self, session_id: str, candidate: RTCIceCandidateInit
-    ) -> None:
-        """Handle a WebRTC ICE candidate.
-        
-        MediaMTX WHEP handles ICE negotiation internally, so we just log this.
-        """
-        _LOGGER.debug(
-            "Received ICE candidate for camera %s session %s (handled by MediaMTX)",
-            self._did, session_id
-        )
-
-    def close_webrtc_session(self, session_id: str) -> None:
-        """Close a WebRTC session.
-        
-        Send DELETE to WHEP resource to clean up MediaMTX session.
-        """
-        resource_url = self._webrtc_sessions.pop(session_id, None)
-        if resource_url:
-            _LOGGER.debug("Closing WebRTC session %s for camera %s", session_id, self._did)
-            # Fire and forget the cleanup - don't block
-            asyncio.create_task(self._close_whep_session(resource_url))
-
-    async def _close_whep_session(self, resource_url: str) -> None:
-        """Send DELETE to WHEP resource to clean up session."""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.delete(
-                    resource_url,
-                    timeout=aiohttp.ClientTimeout(total=5),
-                ) as resp:
-                    if resp.status in (200, 204):
-                        _LOGGER.debug("Closed WHEP session: %s", resource_url)
-                    else:
-                        _LOGGER.warning("Failed to close WHEP session: %s", resp.status)
-        except Exception as err:
-            _LOGGER.warning("Error closing WHEP session: %s", err)
+        _LOGGER.debug("Returning RTSP URL for camera %s: %s", self._did, self._rtsp_url)
+        return self._rtsp_url
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -247,7 +143,6 @@ class XiaomiMiotCamera(Camera):
     def available(self) -> bool:
         """Return True if entity is available."""
         # Camera is available as long as we're connected to the backend
-        # The actual streaming state is indicated by is_streaming
         return True
 
     @property
@@ -268,7 +163,10 @@ class XiaomiMiotCamera(Camera):
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
-        """Return a still image from the camera."""
+        """Return a still image from the camera.
+        
+        Uses the Add-on's snapshot API endpoint.
+        """
         try:
             frame = await self._coordinator.async_get_frame(self._did, self._channel)
             if frame:
@@ -290,7 +188,10 @@ class XiaomiMiotCamera(Camera):
     async def handle_async_mjpeg_stream(
         self, request: web.Request
     ) -> web.StreamResponse | None:
-        """Generate an HTTP MJPEG stream from the camera."""
+        """Generate an HTTP MJPEG stream from the camera.
+        
+        This is a fallback for clients that don't support WebRTC.
+        """
         if not self.available:
             _LOGGER.warning("Camera %s is not available for streaming", self._did)
             return None
@@ -307,9 +208,17 @@ class XiaomiMiotCamera(Camera):
         return await self.async_camera_image()
 
     async def async_turn_on(self) -> None:
-        """Turn on camera (not supported - always on)."""
-        _LOGGER.debug("Turn on requested for camera %s (not supported)", self._did)
+        """Turn on camera (start streaming)."""
+        _LOGGER.debug("Turn on requested for camera %s", self._did)
+        try:
+            await self._coordinator.async_start_camera(self._did)
+        except Exception as err:
+            _LOGGER.error("Failed to turn on camera %s: %s", self._did, err)
 
     async def async_turn_off(self) -> None:
-        """Turn off camera (not supported)."""
-        _LOGGER.debug("Turn off requested for camera %s (not supported)", self._did)
+        """Turn off camera (stop streaming)."""
+        _LOGGER.debug("Turn off requested for camera %s", self._did)
+        try:
+            await self._coordinator.async_stop_camera(self._did)
+        except Exception as err:
+            _LOGGER.error("Failed to turn off camera %s: %s", self._did, err)

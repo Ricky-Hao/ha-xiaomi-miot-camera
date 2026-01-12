@@ -18,7 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install mediamtx (RTSP server)
+# Install mediamtx (lightweight RTSP server)
+# Only used for RTSP relay, WebRTC is handled by HA go2rtc
 ARG TARGETARCH
 RUN MEDIAMTX_VERSION="1.9.3" && \
     if [ "$TARGETARCH" = "amd64" ]; then ARCH="linux_amd64"; \
@@ -50,6 +51,8 @@ COPY src/ /app/
 RUN chmod +x /run.sh
 
 # Expose ports
+# 8765: HTTP API
+# 8554: RTSP streaming (for HA go2rtc)
 EXPOSE 8765 8554
 
 CMD ["/run.sh"]
