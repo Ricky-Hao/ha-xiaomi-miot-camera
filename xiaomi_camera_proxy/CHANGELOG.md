@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.16] - 2026-01-12 (Integration + Add-on)
+
+### Fixed
+- **Fix camera auto-reconnect after integration reconfigure**: Now properly handles placeholder tokens
+  - When integration sends "managed_by_addon" placeholder, Add-on uses existing saved tokens and triggers auto-start
+  - Previously, placeholder tokens were ignored, preventing auto-reconnect
+- **Fix camera state showing "Idle" instead of "Recording"**: Added `is_recording` property to camera entity
+  - When streaming, camera now shows "监控中" (Recording) instead of "空闲" (Idle)
+
 ## [0.6.15] - 2026-01-12 (Integration + Add-on)
 
 ### Fixed

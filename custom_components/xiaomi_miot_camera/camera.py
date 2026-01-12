@@ -179,6 +179,16 @@ class XiaomiMiotCamera(Camera):
         return self._camera_data.is_streaming
 
     @property
+    def is_recording(self) -> bool:
+        """Return True if camera is recording (streaming).
+        
+        This affects the camera state shown in HA UI:
+        - True: shows as 'Recording' (监控中)
+        - False: shows as 'Idle' (空闲)
+        """
+        return self._camera_data.is_streaming
+
+    @property
     def is_on(self) -> bool:
         """Return True if camera is on."""
         return True

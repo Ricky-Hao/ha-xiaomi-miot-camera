@@ -192,15 +192,27 @@ class CameraService:
         """Set tokens directly (from HA integration).
         
         After setting tokens, this will:
-        1. Save tokens to persistent storage
+        1. Save tokens to persistent storage (if real tokens)
         2. Re-initialize the camera manager with new tokens
         3. Auto-start previously active cameras
+        
+        If placeholder tokens are received ("managed_by_addon"), we skip
+        token update but still trigger auto-start for active cameras.
         """
-        # Validate token is not a placeholder
-        if access_token in ("managed_by_addon", "", None):
-            _LOGGER.warning("Ignoring invalid placeholder token")
+        # Check if this is a placeholder token
+        is_placeholder = access_token in ("managed_by_addon", "", None)
+        
+        if is_placeholder:
+            _LOGGER.info("Received placeholder token, using existing Add-on tokens")
+            # Still trigger auto-start if we have existing tokens
+            if self._oauth_info:
+                _LOGGER.info("Triggering auto-start with existing tokens")
+                asyncio.create_task(self._delayed_auto_start_async())
+            else:
+                _LOGGER.warning("No existing tokens, cannot auto-start cameras")
             return
-            
+        
+        # Real tokens received - update and save
         self._cloud_server = cloud_server
         self._oauth_info = MIoTOauthInfo(
             access_token=access_token,
