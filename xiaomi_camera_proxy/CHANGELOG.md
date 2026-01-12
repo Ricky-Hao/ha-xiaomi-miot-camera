@@ -348,3 +348,12 @@ Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (exte
 - Support for AAC audio decoding to PCM
 - Multi-camera support
 - Multi-channel support
+
+## [0.5.2] - 2025-01-XX
+
+### Changed
+- Rewritten RTSP streamer for stability (borrowed from miloco design)
+  - Added dedicated writer thread to prevent asyncio blocking
+  - Reduced probesize from 5MB to 32KB for faster stream start
+  - Added frame queue with automatic drop on overflow
+  - Added automatic FFmpeg restart on crash

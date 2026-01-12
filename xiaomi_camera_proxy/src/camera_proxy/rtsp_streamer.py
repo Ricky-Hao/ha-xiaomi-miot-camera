@@ -1,11 +1,20 @@
 # -*- coding: utf-8 -*-
 # Copyright (C) 2025 Xiaomi Corporation
 # This software may be used and distributed according to the terms of the Xiaomi Miloco License Agreement.
-"""RTSP streamer - pushes H.264/H.265 to MediaMTX RTSP server."""
+"""RTSP streamer - pushes H.264/H.265 to MediaMTX RTSP server.
+
+Key design principles (learned from miloco):
+1. Non-blocking writes to FFmpeg stdin using thread pool
+2. Small queue to prevent frame buildup
+3. Minimal probesize to reduce latency
+4. Separate thread for FFmpeg communication
+"""
 import asyncio
 import logging
 import subprocess
-from typing import Dict
+import threading
+from collections import deque
+from typing import Dict, Optional
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,17 +51,78 @@ def detect_codec_from_nalu(data: bytes) -> int:
     return 5  # Default to H.265
 
 
+class FFmpegWriter(threading.Thread):
+    """Dedicated thread for writing to FFmpeg stdin.
+    
+    This prevents blocking the asyncio event loop when FFmpeg's
+    pipe buffer is full.
+    """
+    
+    def __init__(self, stream_key: str, process: subprocess.Popen, max_queue_size: int = 30):
+        super().__init__(daemon=True)
+        self._stream_key = stream_key
+        self._process = process
+        self._queue: deque = deque(maxlen=max_queue_size)
+        self._lock = threading.Lock()
+        self._event = threading.Event()
+        self._running = True
+        self._frame_count = 0
+        self._drop_count = 0
+    
+    def push_frame(self, data: bytes) -> bool:
+        """Push frame to queue (non-blocking)."""
+        with self._lock:
+            if len(self._queue) >= self._queue.maxlen:
+                # Queue full, drop oldest frame
+                self._queue.popleft()
+                self._drop_count += 1
+            self._queue.append(data)
+        self._event.set()
+        return True
+    
+    def run(self):
+        """Writer thread main loop."""
+        while self._running and self._process.poll() is None:
+            # Wait for frames
+            self._event.wait(timeout=1.0)
+            self._event.clear()
+            
+            # Write all queued frames
+            while True:
+                with self._lock:
+                    if not self._queue:
+                        break
+                    frame = self._queue.popleft()
+                
+                try:
+                    if self._process.stdin:
+                        self._process.stdin.write(frame)
+                        self._process.stdin.flush()
+                        self._frame_count += 1
+                except (BrokenPipeError, OSError) as e:
+                    _LOGGER.error("FFmpeg write error [%s]: %s", self._stream_key, e)
+                    self._running = False
+                    break
+        
+        _LOGGER.info("FFmpegWriter stopped [%s]: wrote %d frames, dropped %d",
+                    self._stream_key, self._frame_count, self._drop_count)
+    
+    def stop(self):
+        """Stop the writer thread."""
+        self._running = False
+        self._event.set()
+
+
 class RTSPStreamer:
     """Push H.264/H.265 streams to MediaMTX RTSP server."""
 
     def __init__(self):
         """Initialize RTSP streamer."""
         self._streamers: Dict[str, subprocess.Popen] = {}
-        self._stream_queues: Dict[str, asyncio.Queue] = {}
-        self._tasks: Dict[str, asyncio.Task] = {}
-        self._frame_counts: Dict[str, int] = {}
+        self._writers: Dict[str, FFmpegWriter] = {}
         self._detected_codecs: Dict[str, int] = {}
-        self._pending_first_frame: Dict[str, bytes] = {}  # Store first frame
+        self._frame_counts: Dict[str, int] = {}
+        self._prepared_streams: set = set()
 
     def _is_stream_running(self, stream_key: str) -> bool:
         """Check if FFmpeg process is still running."""
@@ -63,34 +133,42 @@ class RTSPStreamer:
     async def start_stream(self, did: str, channel: int = 0, codec_id: int = 0) -> bool:
         """Prepare RTSP stream for a camera."""
         stream_key = f"{did}_{channel}"
-        self._stream_queues[stream_key] = asyncio.Queue(maxsize=100)
+        self._prepared_streams.add(stream_key)
         self._frame_counts[stream_key] = 0
         _LOGGER.info("Prepared RTSP stream for %s", stream_key)
         return True
 
-    async def _start_ffmpeg(self, stream_key: str, codec_id: int, first_frame: bytes) -> bool:
-        """Start FFmpeg process and send first frame."""
+    def _start_ffmpeg_sync(self, stream_key: str, codec_id: int, first_frame: bytes) -> bool:
+        """Start FFmpeg process (sync, called from push_frame)."""
         try:
             did, channel = stream_key.rsplit("_", 1)
             rtsp_url = f"rtsp://localhost:8554/camera/{did}/{channel}"
             input_format = "hevc" if codec_id == 5 else "h264"
             
+            # Key FFmpeg settings for low latency:
+            # - probesize 32K: just enough for VPS/SPS/PPS in first IDR frame
+            # - analyzeduration 0: don't wait to analyze
+            # - fflags nobuffer: disable input buffering
+            # - flags low_delay: minimize latency
             cmd = [
                 "ffmpeg",
                 "-hide_banner",
-                "-loglevel", "warning",  # Reduce log noise
-                "-probesize", "5000000",
-                "-analyzeduration", "5000000",
-                "-fflags", "+genpts+discardcorrupt",
+                "-loglevel", "warning",
+                # Input: minimal buffering
+                "-probesize", "32768",  # 32KB
+                "-analyzeduration", "0",
+                "-fflags", "+genpts+nobuffer+discardcorrupt",
+                "-flags", "low_delay",
                 "-f", input_format,
                 "-i", "pipe:0",
+                # Output: copy, no delay
                 "-c:v", "copy",
                 "-f", "rtsp",
                 "-rtsp_transport", "tcp",
                 rtsp_url
             ]
             
-            _LOGGER.info("Starting FFmpeg for %s: %s -> %s", stream_key, input_format, rtsp_url)
+            _LOGGER.info("Starting FFmpeg [%s]: %s -> %s", stream_key, input_format, rtsp_url)
             
             process = subprocess.Popen(
                 cmd,
@@ -102,69 +180,76 @@ class RTSPStreamer:
             
             self._streamers[stream_key] = process
             
-            # Write first frame immediately (contains VPS/SPS/PPS)
+            # Write first frame immediately
             if process.stdin and first_frame:
                 process.stdin.write(first_frame)
                 process.stdin.flush()
             
-            # Start writer task
-            self._tasks[stream_key] = asyncio.create_task(
-                self._write_loop(stream_key, process)
-            )
+            # Start dedicated writer thread
+            writer = FFmpegWriter(stream_key, process)
+            writer.start()
+            self._writers[stream_key] = writer
             
-            # Start error monitor (minimal logging)
-            asyncio.create_task(self._error_monitor(stream_key, process))
+            # Start error monitor in background
+            asyncio.get_event_loop().create_task(
+                self._error_monitor(stream_key, process)
+            )
             
             return True
             
         except Exception as e:
-            _LOGGER.error("Failed to start FFmpeg for %s: %s", stream_key, e)
+            _LOGGER.error("Failed to start FFmpeg [%s]: %s", stream_key, e)
             return False
 
     async def _error_monitor(self, stream_key: str, process: subprocess.Popen):
-        """Monitor FFmpeg stderr for errors only."""
+        """Monitor FFmpeg stderr."""
         try:
             loop = asyncio.get_event_loop()
             while process.poll() is None:
                 line = await loop.run_in_executor(None, process.stderr.readline)
                 if line:
                     line_str = line.decode().strip()
-                    # Only log warnings and errors
                     if line_str and not line_str.startswith("frame="):
                         if "error" in line_str.lower():
                             _LOGGER.error("FFmpeg [%s]: %s", stream_key, line_str)
-                        elif "warning" in line_str.lower() or "discarding" in line_str.lower():
-                            _LOGGER.warning("FFmpeg [%s]: %s", stream_key, line_str)
+                        elif not line_str.startswith("["):  # Skip codec info
+                            _LOGGER.debug("FFmpeg [%s]: %s", stream_key, line_str)
         except Exception:
             pass
+        
+        # FFmpeg exited
+        exit_code = process.poll()
+        if exit_code and exit_code != 0:
+            _LOGGER.warning("FFmpeg [%s] exited with code %d", stream_key, exit_code)
 
     async def stop_stream(self, did: str, channel: int = 0):
         """Stop RTSP stream for a camera."""
         stream_key = f"{did}_{channel}"
         
-        if stream_key in self._tasks:
-            self._tasks[stream_key].cancel()
-            try:
-                await self._tasks[stream_key]
-            except asyncio.CancelledError:
-                pass
-            del self._tasks[stream_key]
+        # Stop writer thread
+        if stream_key in self._writers:
+            self._writers[stream_key].stop()
+            self._writers[stream_key].join(timeout=2)
+            del self._writers[stream_key]
         
+        # Kill FFmpeg
         if stream_key in self._streamers:
             process = self._streamers[stream_key]
             if process.stdin:
-                process.stdin.close()
+                try:
+                    process.stdin.close()
+                except Exception:
+                    pass
             process.terminate()
             try:
-                process.wait(timeout=5)
+                process.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 process.kill()
             del self._streamers[stream_key]
         
-        self._stream_queues.pop(stream_key, None)
-        self._frame_counts.pop(stream_key, None)
+        self._prepared_streams.discard(stream_key)
         self._detected_codecs.pop(stream_key, None)
-        self._pending_first_frame.pop(stream_key, None)
+        self._frame_counts.pop(stream_key, None)
         
         _LOGGER.info("Stopped RTSP stream: %s", stream_key)
 
@@ -172,10 +257,10 @@ class RTSPStreamer:
         """Push H.264/H.265 frame to stream."""
         stream_key = f"{did}_{channel}"
         
-        if stream_key not in self._stream_queues:
+        if stream_key not in self._prepared_streams:
             return
         
-        # Auto-detect codec and start FFmpeg on first frame
+        # First frame: detect codec and start FFmpeg
         if stream_key not in self._detected_codecs:
             detected = detect_codec_from_nalu(frame_data)
             if detected == 0:
@@ -183,48 +268,29 @@ class RTSPStreamer:
             self._detected_codecs[stream_key] = detected
             
             codec_name = "H.265" if detected == 5 else "H.264"
-            _LOGGER.info("Detected %s for %s, size=%d", codec_name, stream_key, len(frame_data))
+            _LOGGER.info("Detected %s for %s (frame size=%d)", codec_name, stream_key, len(frame_data))
             
-            # Start FFmpeg with the first frame (contains parameter sets)
-            await self._start_ffmpeg(stream_key, detected, frame_data)
+            # Start FFmpeg synchronously with first frame
+            self._start_ffmpeg_sync(stream_key, detected, frame_data)
             self._frame_counts[stream_key] = 1
-            return  # First frame already sent to FFmpeg
+            return
         
-        # Restart FFmpeg if crashed
+        # FFmpeg crashed? Restart with this frame
         if not self._is_stream_running(stream_key):
             codec_id = self._detected_codecs.get(stream_key, 5)
-            _LOGGER.warning("FFmpeg crashed for %s, restarting", stream_key)
-            await self._start_ffmpeg(stream_key, codec_id, frame_data)
+            _LOGGER.warning("FFmpeg [%s] not running, restarting", stream_key)
+            # Clean up old writer
+            if stream_key in self._writers:
+                self._writers[stream_key].stop()
+                del self._writers[stream_key]
+            self._start_ffmpeg_sync(stream_key, codec_id, frame_data)
             return
         
-        # Count and log periodically
-        self._frame_counts[stream_key] = self._frame_counts.get(stream_key, 0) + 1
-        count = self._frame_counts[stream_key]
-        if count % 500 == 0:  # Log every 500 frames
-            _LOGGER.debug("Stream %s: %d frames", stream_key, count)
-        
-        # Queue frame for FFmpeg
-        try:
-            self._stream_queues[stream_key].put_nowait(frame_data)
-        except asyncio.QueueFull:
-            pass  # Drop frame silently if queue full
-
-    async def _write_loop(self, stream_key: str, process: subprocess.Popen):
-        """Write frames from queue to FFmpeg stdin."""
-        queue = self._stream_queues.get(stream_key)
-        if not queue:
-            return
-        
-        try:
-            while True:
-                frame_data = await queue.get()
-                if process.stdin:
-                    process.stdin.write(frame_data)
-                    process.stdin.flush()
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            _LOGGER.error("Write loop error %s: %s", stream_key, e)
+        # Normal frame: push to writer thread
+        writer = self._writers.get(stream_key)
+        if writer:
+            writer.push_frame(frame_data)
+            self._frame_counts[stream_key] = self._frame_counts.get(stream_key, 0) + 1
 
     async def stop_all(self):
         """Stop all streams."""
