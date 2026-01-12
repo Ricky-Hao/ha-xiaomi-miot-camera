@@ -242,17 +242,15 @@ class CameraProxyServer:
         try:
             data = await request.json() if request.body_exists else {}
             
-            # Convert quality int to enum (default HIGH=3)
+            # Get quality value (default HIGH=3)
+            # Allow any int value for experimental testing
             quality_int = data.get("quality", MIoTCameraVideoQuality.HIGH.value)
-            try:
-                quality = MIoTCameraVideoQuality(quality_int)
-            except ValueError:
-                quality = MIoTCameraVideoQuality.HIGH
+            _LOGGER.info("Starting camera %s with quality=%d", did, quality_int)
             
             await self._camera_service.start_camera_async(
                 did=did,
                 pin_code=data.get("pin_code"),
-                quality=quality,
+                quality=quality_int,
                 enable_audio=data.get("enable_audio", False),
             )
             

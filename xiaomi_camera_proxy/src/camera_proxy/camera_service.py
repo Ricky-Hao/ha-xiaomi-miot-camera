@@ -27,6 +27,19 @@ from miot.types import (
 )
 from miot.const import CLOUD_SERVERS
 
+
+class QualityValue:
+    """Wrapper to allow any integer quality value.
+    
+    This mimics MIoTCameraVideoQuality enum behavior but accepts any int.
+    Used for testing experimental quality values like 4 or 5.
+    """
+    def __init__(self, value: int):
+        self.value = value
+    
+    def __repr__(self):
+        return f"QualityValue({self.value})"
+
 from .rtsp_streamer import RTSPStreamer
 
 _LOGGER = logging.getLogger(__name__)
@@ -255,7 +268,7 @@ class CameraService:
         self,
         did: str,
         pin_code: Optional[str] = None,
-        quality: MIoTCameraVideoQuality = MIoTCameraVideoQuality.HIGH,
+        quality: int = 3,  # 1=LOW, 3=HIGH, 4/5=experimental
         enable_audio: bool = False,
     ) -> None:
         """Start streaming a camera.
@@ -325,10 +338,14 @@ class CameraService:
             )
         
         # Start streaming
+        # Use a list of QualityValue to allow any integer (including experimental 4/5)
+        quality_list = [QualityValue(quality) for _ in range(camera_info.channel_count)]
+        _LOGGER.info("Starting camera %s with quality=%d (list=%s)", did, quality, quality_list)
+        
         await self._camera_manager.start_camera_async(
             did=did,
             pin_code=pin_code,
-            qualities=quality,
+            qualities=quality_list,
             enable_audio=enable_audio,
             enable_reconnect=True,
         )

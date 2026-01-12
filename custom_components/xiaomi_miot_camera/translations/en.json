@@ -37,9 +37,10 @@
         "step": {
             "init": {
                 "title": "Xiaomi MIoT Camera Options",
-                "description": "Select cameras to add to Home Assistant. All discovered cameras are shown below.",
+                "description": "Select cameras to add to Home Assistant. All discovered cameras are shown below.\n\n**Video Quality:**\n- Low (1): Lower resolution, less bandwidth\n- High (3): Standard HD quality\n- Super (4): Experimental - may not work on all cameras\n- Ultra (5): Experimental - may not work on all cameras",
                 "data": {
-                    "selected_cameras": "Selected Cameras"
+                    "selected_cameras": "Selected Cameras",
+                    "video_quality": "Video Quality"
                 }
             }
         },

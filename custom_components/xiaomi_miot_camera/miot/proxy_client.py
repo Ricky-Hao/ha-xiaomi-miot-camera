@@ -162,7 +162,7 @@ class CameraProxyHttpClient:
         self,
         did: str,
         pin_code: Optional[str] = None,
-        quality: int = 2,  # HIGH = 2
+        quality: int = 3,  # 1=LOW, 3=HIGH, 4/5=experimental
         enable_audio: bool = False,
     ) -> bool:
         """Start camera streaming. Returns success status."""

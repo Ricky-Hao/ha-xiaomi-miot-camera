@@ -92,7 +92,7 @@ class CameraBackend:
         self,
         did: str,
         pin_code: Optional[str] = None,
-        quality: MIoTCameraVideoQuality = MIoTCameraVideoQuality.HIGH,
+        quality: int = 3,  # 1=LOW, 3=HIGH, 4/5=experimental
         enable_audio: bool = False,
     ) -> bool:
         """Start camera streaming. Returns success status."""
@@ -102,7 +102,7 @@ class CameraBackend:
         return await self._client.start_camera_async(
             did=did,
             pin_code=pin_code,
-            quality=quality.value if isinstance(quality, MIoTCameraVideoQuality) else quality,
+            quality=quality,
             enable_audio=enable_audio,
         )
 

@@ -24,9 +24,15 @@ class MIoTOauthInfo(BaseOAuthInfo):
 
 
 class MIoTCameraVideoQuality(int, Enum):
-    """MIoT Camera Video Quality."""
+    """MIoT Camera Video Quality.
+    
+    Note: LOW and HIGH are officially documented.
+    SUPER and ULTRA are experimental - may not be supported by all cameras.
+    """
     LOW = 1
     HIGH = 3
+    SUPER = 4  # Experimental
+    ULTRA = 5  # Experimental
 
 
 class MIoTCameraStatus(int, Enum):
