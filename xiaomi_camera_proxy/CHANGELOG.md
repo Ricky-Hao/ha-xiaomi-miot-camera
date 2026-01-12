@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.11] - 2026-01-12
+
+### Changed
+- **Always-on streaming optimization**: If camera is already streaming, `start_camera` returns immediately without re-initialization
+- **Reduced camera open latency**: Skip wait time when RTSP stream is already ready
+- **Refactored stream ready check**: Extracted `_check_stream_ready_async()` for non-blocking status check
+
+### Improved
+- Opening camera in HA frontend is now instant when stream is already active
+- Better code organization for stream status checking
+
 ## [0.4.10] - 2026-01-12
 
 ### Added

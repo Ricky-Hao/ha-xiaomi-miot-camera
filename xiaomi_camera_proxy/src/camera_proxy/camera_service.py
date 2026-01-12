@@ -258,7 +258,11 @@ class CameraService:
         quality: MIoTCameraVideoQuality = MIoTCameraVideoQuality.HIGH,
         enable_audio: bool = False,
     ) -> None:
-        """Start streaming a camera."""
+        """Start streaming a camera.
+        
+        If camera is already streaming and RTSP is ready, returns immediately.
+        This enables "always-on" streaming without re-initialization delay.
+        """
         if not self._camera_manager:
             raise ValueError("Camera manager not initialized")
 
@@ -266,6 +270,21 @@ class CameraService:
             raise ValueError(f"Camera not found: {did}")
 
         camera_info = self._camera_list[did]
+        
+        # Fast path: if camera is already active and streaming, return immediately
+        if did in self._active_cameras:
+            # Check if RTSP stream is already ready
+            stream_ready = await self._check_stream_ready_async(did, 0)
+            if stream_ready:
+                _LOGGER.info("Camera %s already streaming, returning immediately", did)
+                return
+            else:
+                _LOGGER.info("Camera %s active but stream not ready, waiting...", did)
+                # Just wait for stream to be ready
+                if self._rtsp_streamer:
+                    for channel in range(camera_info.channel_count):
+                        await self._wait_for_stream_ready_async(did, channel)
+                return
         
         # Create camera instance if not exists
         if did not in self._active_cameras:
@@ -556,6 +575,36 @@ class CameraService:
         except Exception as e:
             _LOGGER.error("Error in delayed auto-start: %s", e)
 
+    async def _check_stream_ready_async(self, did: str, channel: int) -> bool:
+        """Check if RTSP stream is currently ready (non-blocking).
+        
+        Args:
+            did: Device ID
+            channel: Camera channel
+            
+        Returns:
+            True if stream is ready and publishing, False otherwise
+        """
+        import aiohttp
+        
+        rtsp_path = f"camera/{did}/{channel}"
+        mediamtx_api = "http://localhost:9997/v3/paths/list"
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(mediamtx_api, timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        paths = data.get("items", [])
+                        
+                        for path_info in paths:
+                            if path_info.get("name") == rtsp_path:
+                                return path_info.get("ready", False)
+        except Exception as e:
+            _LOGGER.debug("Error checking MediaMTX: %s", e)
+        
+        return False
+
     async def _wait_for_stream_ready_async(
         self,
         did: str,
@@ -575,33 +624,15 @@ class CameraService:
         Returns:
             True if stream is ready, False if timeout
         """
-        import aiohttp
-        
         stream_key = f"{did}_{channel}"
-        rtsp_path = f"camera/{did}/{channel}"
-        mediamtx_api = "http://localhost:9997/v3/paths/list"
-        
         start_time = asyncio.get_event_loop().time()
         
         _LOGGER.info("Waiting for RTSP stream %s to be ready...", stream_key)
         
         while (asyncio.get_event_loop().time() - start_time) < timeout:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(mediamtx_api, timeout=aiohttp.ClientTimeout(total=2)) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            paths = data.get("items", [])
-                            
-                            for path_info in paths:
-                                if path_info.get("name") == rtsp_path:
-                                    # Check if someone is publishing
-                                    if path_info.get("ready", False):
-                                        _LOGGER.info("RTSP stream %s is ready", stream_key)
-                                        return True
-            except Exception as e:
-                _LOGGER.debug("Error checking MediaMTX: %s", e)
-            
+            if await self._check_stream_ready_async(did, channel):
+                _LOGGER.info("RTSP stream %s is ready", stream_key)
+                return True
             await asyncio.sleep(0.5)
         
         _LOGGER.warning("Timeout waiting for RTSP stream %s to be ready", stream_key)
