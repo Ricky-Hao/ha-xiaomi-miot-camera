@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.15] - 2026-01-12 (Integration)
+
+### Fixed
+- **Fix "stream doesn't contain any supported codec" error**: Auto-start camera stream before WebRTC negotiation
+- **Add retry logic for WebRTC**: Retry WHEP request up to 3 times if stream is not ready
+- Camera will now automatically start streaming when user opens the camera view
+
 ## [0.4.19] - 2026-01-12 (Add-on)
 
 ### Changed

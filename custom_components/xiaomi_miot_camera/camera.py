@@ -122,40 +122,78 @@ class XiaomiMiotCamera(Camera):
         Uses MediaMTX's WHEP (WebRTC-HTTP Egress Protocol) endpoint for
         instant low-latency streaming without HA transcoding.
         """
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self._whep_url,
-                    data=offer_sdp,
-                    headers={
-                        "Content-Type": "application/sdp",
-                    },
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status == 201:
-                        answer_sdp = await resp.text()
-                        # Store the resource URL for later cleanup
-                        resource_url = resp.headers.get("Location")
-                        if resource_url:
-                            self._webrtc_sessions[session_id] = resource_url
-                        _LOGGER.debug(
-                            "WebRTC offer/answer exchange successful for camera %s (session: %s)",
-                            self._did, session_id
-                        )
-                        send_message(WebRTCAnswer(answer_sdp))
-                    else:
-                        error = await resp.text()
-                        _LOGGER.error(
-                            "WebRTC WHEP request failed: %s - %s",
-                            resp.status, error
-                        )
-                        send_message(WebRTCError("webrtc_offer_failed", f"WHEP error: {resp.status}"))
-        except asyncio.TimeoutError:
-            _LOGGER.error("WebRTC offer timeout for camera %s", self._did)
-            send_message(WebRTCError("webrtc_offer_failed", "Connection timeout"))
-        except Exception as err:
-            _LOGGER.error("WebRTC offer handling failed for camera %s: %s", self._did, err)
-            send_message(WebRTCError("webrtc_offer_failed", str(err)))
+        # Ensure camera stream is started before attempting WebRTC
+        if not self._camera_data.is_streaming:
+            _LOGGER.info("Camera %s not streaming, starting it first...", self._did)
+            try:
+                await self._coordinator.async_start_camera(self._did)
+                # Wait a bit for the stream to be ready
+                await asyncio.sleep(1)
+            except Exception as err:
+                _LOGGER.error("Failed to start camera %s: %s", self._did, err)
+                send_message(WebRTCError("webrtc_offer_failed", f"Failed to start camera: {err}"))
+                return
+        
+        # Retry WHEP request a few times as stream may take a moment to be ready
+        max_retries = 3
+        retry_delay = 1.0  # seconds
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        self._whep_url,
+                        data=offer_sdp,
+                        headers={
+                            "Content-Type": "application/sdp",
+                        },
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.status == 201:
+                            answer_sdp = await resp.text()
+                            # Store the resource URL for later cleanup
+                            resource_url = resp.headers.get("Location")
+                            if resource_url:
+                                self._webrtc_sessions[session_id] = resource_url
+                            _LOGGER.debug(
+                                "WebRTC offer/answer exchange successful for camera %s (session: %s)",
+                                self._did, session_id
+                            )
+                            send_message(WebRTCAnswer(answer_sdp))
+                            return
+                        else:
+                            error = await resp.text()
+                            last_error = f"WHEP error {resp.status}: {error}"
+                            # 400 with "stream doesn't contain any supported codec" means stream not ready
+                            if resp.status == 400 and "codec" in error.lower():
+                                _LOGGER.debug(
+                                    "Stream not ready for camera %s, attempt %d/%d",
+                                    self._did, attempt + 1, max_retries
+                                )
+                                if attempt < max_retries - 1:
+                                    await asyncio.sleep(retry_delay)
+                                    continue
+                            _LOGGER.error(
+                                "WebRTC WHEP request failed: %s - %s",
+                                resp.status, error
+                            )
+            except asyncio.TimeoutError:
+                last_error = "Connection timeout"
+                _LOGGER.debug("WebRTC offer timeout for camera %s, attempt %d/%d", 
+                             self._did, attempt + 1, max_retries)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    continue
+            except Exception as err:
+                last_error = str(err)
+                _LOGGER.error("WebRTC offer handling failed for camera %s: %s", self._did, err)
+                break
+        
+        # All retries failed
+        _LOGGER.error("WebRTC failed for camera %s after %d attempts: %s", 
+                     self._did, max_retries, last_error)
+        send_message(WebRTCError("webrtc_offer_failed", last_error or "Unknown error"))
 
     async def async_on_webrtc_candidate(
         self, session_id: str, candidate: RTCIceCandidateInit

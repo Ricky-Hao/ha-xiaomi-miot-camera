@@ -148,6 +148,10 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Failed to start camera %s: %s", did, err)
             self._cameras[did].status = MIoTCameraStatus.ERROR
 
+    async def async_start_camera(self, did: str) -> None:
+        """Start streaming a camera (public method for entities to call)."""
+        await self._start_camera(did)
+
     async def async_get_frame(self, did: str, channel: int = 0) -> Optional[bytes]:
         """Get a snapshot frame for a camera."""
         if self._backend:
