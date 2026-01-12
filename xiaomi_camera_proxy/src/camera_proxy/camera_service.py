@@ -167,6 +167,11 @@ class CameraService:
         expires_ts: int,
     ) -> None:
         """Set tokens directly (from HA integration)."""
+        # Validate token is not a placeholder
+        if access_token in ("managed_by_addon", "", None):
+            _LOGGER.warning("Ignoring invalid placeholder token")
+            return
+            
         self._cloud_server = cloud_server
         self._oauth_info = MIoTOauthInfo(
             access_token=access_token,
@@ -369,7 +374,16 @@ class CameraService:
             
             self._cloud_server = data.get("cloud_server", "cn")
             if "oauth_info" in data:
-                self._oauth_info = MIoTOauthInfo(**data["oauth_info"])
+                oauth_info = MIoTOauthInfo(**data["oauth_info"])
+                
+                # Validate token is not a placeholder
+                if oauth_info.access_token in ("managed_by_addon", "", None):
+                    _LOGGER.warning("Invalid saved tokens (placeholder), ignoring")
+                    # Delete invalid tokens file
+                    TOKENS_FILE.unlink()
+                    return
+                
+                self._oauth_info = oauth_info
                 await self._init_camera_manager_async()
                 _LOGGER.info("Loaded saved tokens")
         except Exception as e:
