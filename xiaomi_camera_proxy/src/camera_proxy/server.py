@@ -20,7 +20,7 @@ from .rtsp_streamer import RTSPStreamer
 
 _LOGGER = logging.getLogger(__name__)
 
-__version__ = "0.6.21"
+__version__ = "0.6.22"
 
 
 class CameraProxyServer:
