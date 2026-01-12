@@ -27,7 +27,7 @@ webrtcAddress: :8889
 webrtcEncryption: no
 webrtcAllowOrigin: '*'
 webrtcICEServers2:
-  - url: stun:stun.l.google.com:19302
+  - url: stun:gd.rickyhao.com:3478
 
 ###############################################
 # HLS - DISABLED

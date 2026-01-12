@@ -432,3 +432,8 @@ Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (exte
 
 ### Fixed
 - Fix MediaMTX ICE server configuration format (use `url:` instead of `urls:`)
+
+## [0.6.6] - 2026-01-12
+
+### Changed
+- Use custom STUN server (gd.rickyhao.com:3478)
