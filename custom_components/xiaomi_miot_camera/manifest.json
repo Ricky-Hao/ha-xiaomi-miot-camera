@@ -1,7 +1,7 @@
 {
     "domain": "xiaomi_miot_camera",
     "name": "Xiaomi MIoT Camera",
-    "version": "0.5.5",
+    "version": "0.6.0",
     "codeowners": [
         "@Ricky-Hao"
     ],

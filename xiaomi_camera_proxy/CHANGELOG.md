@@ -381,3 +381,17 @@ Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (exte
   - Solves HLS fallback issue - WebRTC should work in all browsers now
   - Uses FFmpeg libx264 with ultrafast preset for low latency
   - Disable via Add-on config if your browser supports H.265 WebRTC
+
+## [0.6.0] - 2025-01-12
+
+### Changed
+- **Major architecture change: Direct WebRTC streaming**
+  - Add-on now provides WebRTC directly via WHEP (port 8889)
+  - No longer depends on HA go2rtc
+  - Integration handles WebRTC signaling via `async_handle_web_rtc_offer()`
+  - FFmpeg transcodes H.265→H.264 for browser compatibility
+  - MediaMTX converts RTSP to WebRTC internally
+
+### Removed
+- RTSP port 8554 exposure (now internal only)
+- Dependency on HA go2rtc for WebRTC conversion

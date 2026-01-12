@@ -2,16 +2,17 @@
 # This software may be used and distributed according to the terms of the Xiaomi Miloco License Agreement.
 """Camera platform for Xiaomi MIoT Camera integration.
 
-This integration uses HA's native go2rtc for WebRTC streaming:
-- Add-on provides RTSP streams at rtsp://<host>:8554/camera/{did}/{channel}
-- Integration returns RTSP URL via stream_source()
-- HA go2rtc handles WebRTC conversion automatically
+This integration uses direct WebRTC streaming from the Add-on:
+- Add-on provides WebRTC streams via WHEP at http://<host>:8889/camera/{did}/{channel}/whep
+- Integration handles WebRTC signaling directly
+- No HA go2rtc dependency - direct low-latency WebRTC
 """
 from __future__ import annotations
 
 import logging
 from typing import Any
 
+import aiohttp
 from aiohttp import web
 
 from homeassistant.components.camera import (
@@ -19,20 +20,23 @@ from homeassistant.components.camera import (
     CameraEntityFeature,
     async_get_still_stream,
 )
+from homeassistant.components.camera.webrtc import (
+    CameraWebRTCProvider,
+    async_register_webrtc_provider,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, DEFAULT_FRAME_INTERVAL
-# Use the simplified coordinator that delegates to Add-on
 from .coordinator import XiaomiCameraCoordinator, CameraData
 
 _LOGGER = logging.getLogger(__name__)
 
-# Add-on RTSP server address
+# Add-on WebRTC WHEP endpoint
 # When running as HA Add-on with host_network, it's accessible at localhost
-RTSP_BASE_URL = "rtsp://127.0.0.1:8554"
+WEBRTC_BASE_URL = "http://127.0.0.1:8889"
 
 
 async def async_setup_entry(
@@ -64,17 +68,16 @@ async def async_setup_entry(
 
 
 class XiaomiMiotCamera(Camera):
-    """Xiaomi MIoT Camera entity.
+    """Xiaomi MIoT Camera entity with direct WebRTC support.
     
     Streaming architecture:
-    - Add-on runs MediaMTX as RTSP server on port 8554
-    - FFmpeg pushes camera H.265/H.264 streams to MediaMTX
-    - This entity returns RTSP URL via stream_source()
-    - HA's go2rtc converts RTSP to WebRTC for low-latency playback
+    - Add-on runs MediaMTX with WebRTC enabled on port 8889
+    - FFmpeg transcodes H.265→H.264 and pushes to MediaMTX RTSP
+    - MediaMTX converts RTSP to WebRTC (WHEP protocol)
+    - This entity handles WebRTC signaling directly via WHEP
     """
 
     _attr_has_entity_name = True
-    # Support STREAM feature for go2rtc integration
     _attr_supported_features = CameraEntityFeature.STREAM
 
     def __init__(
@@ -104,30 +107,52 @@ class XiaomiMiotCamera(Camera):
         # Frame interval in seconds (for MJPEG fallback)
         self._frame_interval = DEFAULT_FRAME_INTERVAL / 1000.0
         
-        # RTSP stream URL for go2rtc
-        self._rtsp_url = f"{RTSP_BASE_URL}/camera/{self._did}/{self._channel}"
+        # WebRTC WHEP URL
+        self._whep_url = f"{WEBRTC_BASE_URL}/camera/{self._did}/{self._channel}/whep"
 
-    async def stream_source(self) -> str | None:
-        """Return the RTSP stream source for go2rtc.
+    @property
+    def frontend_stream_type(self) -> str:
+        """Return the frontend stream type."""
+        return "web_rtc"
+
+    async def async_handle_web_rtc_offer(self, offer_sdp: str) -> str | None:
+        """Handle WebRTC offer and return answer.
         
-        HA's go2rtc will:
-        1. Connect to this RTSP URL
-        2. Auto-detect codec (H.265/H.264)
-        3. Convert to WebRTC for browser playback
-        
-        The camera stream is started automatically when needed.
+        This method is called by HA frontend when starting WebRTC stream.
+        We forward the SDP offer to MediaMTX WHEP endpoint and return the answer.
         """
         # Ensure camera stream is started
         if not self._camera_data.is_streaming:
-            _LOGGER.info("Starting camera %s for stream access", self._did)
+            _LOGGER.info("Starting camera %s for WebRTC stream", self._did)
             try:
                 await self._coordinator.async_start_camera(self._did)
             except Exception as err:
                 _LOGGER.error("Failed to start camera %s: %s", self._did, err)
                 return None
         
-        _LOGGER.debug("Returning RTSP URL for camera %s: %s", self._did, self._rtsp_url)
-        return self._rtsp_url
+        # Send SDP offer to MediaMTX WHEP endpoint
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self._whep_url,
+                    data=offer_sdp,
+                    headers={"Content-Type": "application/sdp"},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 201:
+                        answer_sdp = await resp.text()
+                        _LOGGER.debug("WebRTC answer received for camera %s", self._did)
+                        return answer_sdp
+                    else:
+                        error_text = await resp.text()
+                        _LOGGER.error(
+                            "WebRTC WHEP failed for camera %s: %s %s",
+                            self._did, resp.status, error_text
+                        )
+                        return None
+        except Exception as err:
+            _LOGGER.error("WebRTC error for camera %s: %s", self._did, err)
+            return None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -142,7 +167,6 @@ class XiaomiMiotCamera(Camera):
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
-        # Camera is available as long as we're connected to the backend
         return True
 
     @property
@@ -153,7 +177,7 @@ class XiaomiMiotCamera(Camera):
     @property
     def is_on(self) -> bool:
         """Return True if camera is on."""
-        return True  # Camera is always on
+        return True
 
     @property
     def frame_interval(self) -> float:
@@ -163,10 +187,7 @@ class XiaomiMiotCamera(Camera):
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
-        """Return a still image from the camera.
-        
-        Uses the Add-on's snapshot API endpoint.
-        """
+        """Return a still image from the camera."""
         try:
             frame = await self._coordinator.async_get_frame(self._did, self._channel)
             if frame:
@@ -188,10 +209,7 @@ class XiaomiMiotCamera(Camera):
     async def handle_async_mjpeg_stream(
         self, request: web.Request
     ) -> web.StreamResponse | None:
-        """Generate an HTTP MJPEG stream from the camera.
-        
-        This is a fallback for clients that don't support WebRTC.
-        """
+        """Generate an HTTP MJPEG stream from the camera."""
         if not self.available:
             _LOGGER.warning("Camera %s is not available for streaming", self._did)
             return None

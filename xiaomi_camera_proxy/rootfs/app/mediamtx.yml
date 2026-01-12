@@ -1,5 +1,5 @@
 # MediaMTX configuration for Xiaomi Camera Proxy
-# Lightweight RTSP server - WebRTC is handled by HA go2rtc
+# Direct WebRTC streaming (WHEP) - no HA go2rtc needed
 
 ###############################################
 # Global settings
@@ -13,16 +13,22 @@ writeTimeout: 60s
 writeQueueSize: 1024
 
 ###############################################
-# RTSP server - exposed to HA go2rtc
+# RTSP server (internal - receives from FFmpeg)
 
 rtsp: yes
 protocols: [tcp]
 rtspAddress: :8554
 
 ###############################################
-# WebRTC - DISABLED (use HA go2rtc instead)
+# WebRTC - ENABLED for direct browser streaming
 
-webrtc: no
+webrtc: yes
+webrtcAddress: :8889
+webrtcEncryption: no
+webrtcAllowOrigin: '*'
+webrtcICEServers2:
+  - urls:
+    - stun:stun.l.google.com:19302
 
 ###############################################
 # HLS - DISABLED
@@ -30,7 +36,7 @@ webrtc: no
 hls: no
 
 ###############################################
-# API - enabled for debugging
+# API - enabled for stream status checks
 
 api: yes
 apiAddress: :9997
@@ -39,15 +45,11 @@ apiAddress: :9997
 # Path defaults
 
 pathDefaults:
-  # Source is FFmpeg publisher (not on-demand pull)
+  # Source is FFmpeg publisher
   source: publisher
   
   # Allow publisher to reconnect/overwrite
   overridePublisher: yes
-  
-  # Keep path even when no one is publishing (prevents 404 on reconnect)
-  # This allows go2rtc to wait for the stream to come back
-  sourceOnDemand: no
   
   # Recording (disabled)
   record: no
@@ -56,7 +58,7 @@ pathDefaults:
 # Paths
 # Camera streams published to /camera/{did}/{channel}
 # RTSP: rtsp://localhost:8554/camera/{did}/{channel}
-# Use HA go2rtc to convert to WebRTC
+# WebRTC (WHEP): http://localhost:8889/camera/{did}/{channel}/whep
 
 paths:
   ~^camera/(.+)/(\d+)$:
