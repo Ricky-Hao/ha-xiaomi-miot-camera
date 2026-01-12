@@ -114,8 +114,7 @@ class XiaomiMiotCamera(Camera):
         """Return True if camera is on."""
         return True  # Camera is always on
 
-    @property
-    def stream_source(self) -> str:
+    async def stream_source(self) -> str | None:
         """Return the RTSP stream source URL."""
         # RTSP stream provided by Camera Proxy Add-on
         # Format: rtsp://127.0.0.1:8554/camera/{did}/{channel}
