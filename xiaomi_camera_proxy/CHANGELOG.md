@@ -450,3 +450,10 @@ Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (exte
   - Use `async_handle_async_webrtc_offer(offer_sdp, session_id, send_message)` instead of old `async_handle_web_rtc_offer`
   - Use `WebRTCAnswer` and `WebRTCError` callback messages
   - This is required for HA 2024.x+ WebRTC support
+
+## [0.6.9] - 2026-01-12
+
+### Changed
+- **Faster integration setup**: Don't start cameras during initialization
+- Cameras now start on-demand when WebRTC stream is requested
+- This makes config flow complete almost instantly

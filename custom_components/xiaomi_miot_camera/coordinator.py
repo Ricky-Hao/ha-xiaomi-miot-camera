@@ -120,12 +120,11 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
                 self._cameras[did] = CameraData(camera_info=camera_info)
                 _LOGGER.info("Added camera: %s (%s)", camera_info.name, did)
 
-        # Start all cameras
-        for did in self._cameras:
-            await self._start_camera(did)
-
+        # Don't start cameras here - they will be started on-demand when WebRTC stream is requested
+        # This makes integration setup much faster
+        
         self._initialized = True
-        _LOGGER.info("Coordinator initialization complete")
+        _LOGGER.info("Coordinator initialization complete (cameras will start on-demand)")
 
     async def _start_camera(self, did: str) -> None:
         """Start streaming a camera."""
