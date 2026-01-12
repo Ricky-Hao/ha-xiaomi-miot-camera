@@ -45,6 +45,10 @@ pathDefaults:
   # Allow publisher to reconnect/overwrite
   overridePublisher: yes
   
+  # Keep path even when no one is publishing (prevents 404 on reconnect)
+  # This allows go2rtc to wait for the stream to come back
+  sourceOnDemand: no
+  
   # Recording (disabled)
   record: no
 

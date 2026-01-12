@@ -562,8 +562,11 @@ class CameraService:
             # Log frame count periodically for debugging
             key = f"{did}_{channel}"
             frame_count = self._rtsp_streamer._frame_counts.get(key, 0)
-            if frame_count > 0 and frame_count % 100 == 0:
-                _LOGGER.debug("Camera %s channel %d: %d frames pushed", did, channel, frame_count)
+            # Log first frame, then every 30 frames (about once per second at 30fps)
+            if frame_count == 1:
+                _LOGGER.info("Camera %s channel %d: first frame received (size=%d)", did, channel, len(data))
+            elif frame_count > 0 and frame_count % 30 == 0:
+                _LOGGER.info("Camera %s channel %d: %d frames pushed", did, channel, frame_count)
 
     async def _on_decoded_jpg(
         self,

@@ -365,3 +365,10 @@ Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (exte
 - Enabled MediaMTX API on port 9997 for debugging
 - Added detailed status change logging for camera disconnect/reconnect
 - Added periodic frame count logging for debugging (every 100 frames)
+
+## [0.5.4] - 2025-01-12
+
+### Changed
+- Improved frame logging: log first frame and every 30 frames (once per second)
+- Added sourceOnDemand: no to MediaMTX config
+- This will help identify if miot_kit stops sending frames
