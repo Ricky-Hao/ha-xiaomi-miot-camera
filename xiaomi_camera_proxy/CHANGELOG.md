@@ -427,3 +427,8 @@ Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (exte
 - Add netcat-openbsd to Dockerfile for port checking
 - Add 8889 port to Dockerfile EXPOSE
 - Improve startup script error messages
+
+## [0.6.5] - 2026-01-12
+
+### Fixed
+- Fix MediaMTX ICE server configuration format (use `url:` instead of `urls:`)
