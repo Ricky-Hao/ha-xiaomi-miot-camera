@@ -29,6 +29,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, DEFAULT_FRAME_INTERVAL
 from .coordinator import XiaomiCameraCoordinator, CameraData
@@ -68,7 +69,7 @@ async def async_setup_entry(
     _LOGGER.info("Added %d camera entities", len(entities))
 
 
-class XiaomiMiotCamera(Camera):
+class XiaomiMiotCamera(CoordinatorEntity, Camera):
     """Xiaomi MIoT Camera entity with direct WebRTC support.
     
     Streaming architecture:
@@ -76,6 +77,11 @@ class XiaomiMiotCamera(Camera):
     - FFmpeg transcodes H.265→H.264 and pushes to MediaMTX RTSP
     - MediaMTX converts RTSP to WebRTC (WHEP protocol)
     - This entity handles WebRTC signaling directly via WHEP
+    
+    Status updates:
+    - Inherits from CoordinatorEntity for automatic status polling
+    - Coordinator polls Add-on every 10 seconds for camera status
+    - is_recording reflects actual streaming status from Add-on
     """
 
     _attr_has_entity_name = True
@@ -89,7 +95,10 @@ class XiaomiMiotCamera(Camera):
         camera_data: CameraData,
     ) -> None:
         """Initialize the camera."""
-        super().__init__()
+        # Initialize CoordinatorEntity first
+        CoordinatorEntity.__init__(self, coordinator)
+        Camera.__init__(self)
+        
         self._coordinator = coordinator
         self._did = did
         self._channel = channel

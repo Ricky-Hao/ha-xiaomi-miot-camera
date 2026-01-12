@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 from homeassistant.core import HomeAssistant
@@ -34,6 +35,9 @@ _LOGGER = logging.getLogger(__name__)
 
 # Default Add-on URL
 DEFAULT_PROXY_URL = "http://127.0.0.1:8765"
+
+# Update interval for polling camera status
+UPDATE_INTERVAL = timedelta(seconds=10)
 
 
 @dataclass
@@ -65,6 +69,7 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
+            update_interval=UPDATE_INTERVAL,  # Poll camera status periodically
         )
         self._cloud_server = cloud_server
         self._oauth_info = MIoTOauthInfo.model_validate(oauth_info)

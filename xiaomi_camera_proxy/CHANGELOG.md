@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.18] - 2026-01-12 (Integration)
+
+### Added
+- **Periodic status polling**: Coordinator now polls Add-on every 10 seconds for camera status
+  - Camera entity inherits from `CoordinatorEntity` for automatic updates
+  - When Add-on finishes async camera reconnection, status will update within 10 seconds
+  - `is_recording` (监控中/空闲) updates automatically without manual refresh
+
+### Why this matters
+- When integration reconfigures, Add-on reconnects cameras **asynchronously**
+- Previously, status was only checked at init (before reconnection finished)
+- Now, polling ensures status syncs even after async reconnection completes
+
 ## [0.6.17] - 2026-01-12 (Integration)
 
 ### Fixed
