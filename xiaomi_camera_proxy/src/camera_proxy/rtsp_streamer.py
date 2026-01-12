@@ -26,6 +26,14 @@ class RTSPStreamer:
         self._tasks: Dict[str, asyncio.Task] = {}
         self._error_tasks: Dict[str, asyncio.Task] = {}
         self._frame_counts: Dict[str, int] = {}
+        self._stream_configs: Dict[str, dict] = {}  # Store config for restart
+
+    def _is_stream_running(self, stream_key: str) -> bool:
+        """Check if FFmpeg process is still running."""
+        if stream_key not in self._streamers:
+            return False
+        process = self._streamers[stream_key]
+        return process.poll() is None
 
     async def start_stream(self, did: str, channel: int = 0, codec_id: int = 4) -> bool:
         """Start RTSP stream for a camera.
@@ -39,11 +47,21 @@ class RTSPStreamer:
             True if started successfully
         """
         stream_key = f"{did}_{channel}"
-        if stream_key in self._streamers:
+        
+        # Store config for later restart
+        self._stream_configs[stream_key] = {"codec_id": codec_id}
+        
+        if self._is_stream_running(stream_key):
             _LOGGER.debug("Stream already running: %s", stream_key)
             return True
 
+        return await self._start_ffmpeg(stream_key, codec_id)
+
+    async def _start_ffmpeg(self, stream_key: str, codec_id: int) -> bool:
+        """Start FFmpeg process for streaming."""
         try:
+            did, channel = stream_key.rsplit("_", 1)
+            
             # RTSP URL: rtsp://localhost:8554/camera/{did}/{channel}
             rtsp_url = f"rtsp://localhost:8554/camera/{did}/{channel}"
             
@@ -168,6 +186,12 @@ class RTSPStreamer:
             channel: Camera channel
         """
         stream_key = f"{did}_{channel}"
+        
+        # Check if FFmpeg process is still running, restart if needed
+        if not self._is_stream_running(stream_key):
+            _LOGGER.warning("FFmpeg process not running for %s, restarting...", stream_key)
+            config = self._stream_configs.get(stream_key, {"codec_id": 4})
+            await self._start_ffmpeg(stream_key, config["codec_id"])
         
         if stream_key not in self._stream_queues:
             _LOGGER.warning("No stream queue for %s, frame dropped", stream_key)
