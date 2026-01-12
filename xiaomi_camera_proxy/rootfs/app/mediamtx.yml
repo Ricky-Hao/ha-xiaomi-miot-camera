@@ -7,6 +7,10 @@
 logLevel: info
 logDestinations: [stdout]
 
+# Timeouts
+readTimeout: 10s
+writeTimeout: 10s
+
 ###############################################
 # RTSP server
 
@@ -46,10 +50,6 @@ pathDefaults:
   
   # Overwrite stream (allow new publisher to take over)
   overridePublisher: yes
-  
-  # Read timeout
-  readTimeout: 10s
-  writeTimeout: 10s
 
 ###############################################
 # Paths

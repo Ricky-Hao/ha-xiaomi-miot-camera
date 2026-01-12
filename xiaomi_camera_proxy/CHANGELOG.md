@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.1] - 2026-01-12
+
+### Fixed
+- Fix mediamtx.yml config: move `readTimeout`/`writeTimeout` to global level
+
 ## [0.3.0] - 2026-01-12
 
 ### Added
