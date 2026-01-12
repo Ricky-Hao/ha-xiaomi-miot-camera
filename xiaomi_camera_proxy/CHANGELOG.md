@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.20] - 2026-01-13 (Add-on)
+
+### Added
+- **Debug logging for auto-start**: Added INFO level logs to track auto-start flow
+  - Log when checking for active cameras file
+  - Log file path and contents
+  - Log when file doesn't exist or is empty
+  - Changed save log from DEBUG to INFO level
+
 ## [0.6.19] - 2026-01-12 (Add-on)
 
 ### Fixed

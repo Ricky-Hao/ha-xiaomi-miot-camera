@@ -521,13 +521,16 @@ class CameraService:
             async with aiofiles.open(ACTIVE_CAMERAS_FILE, "w") as f:
                 await f.write(json.dumps(data, indent=2))
             
-            _LOGGER.debug("Saved active cameras: %s", list(self._active_cameras.keys()))
+            _LOGGER.info("Saved active cameras to %s: %s", ACTIVE_CAMERAS_FILE, list(self._active_cameras.keys()))
         except Exception as e:
             _LOGGER.error("Failed to save active cameras: %s", e)
 
     async def _load_and_start_active_cameras_async(self) -> None:
         """Load and auto-start previously active cameras."""
+        _LOGGER.info("Checking for previously active cameras at: %s", ACTIVE_CAMERAS_FILE)
+        
         if not ACTIVE_CAMERAS_FILE.exists():
+            _LOGGER.info("No active cameras file found, skipping auto-start")
             return
 
         try:
@@ -536,7 +539,10 @@ class CameraService:
                 data = json.loads(await f.read())
             
             active_dids = data.get("active_dids", [])
+            _LOGGER.info("Active cameras file contains: %s", active_dids)
+            
             if not active_dids:
+                _LOGGER.info("No active cameras in file, skipping auto-start")
                 return
             
             _LOGGER.info("Found %d previously active cameras to auto-start", len(active_dids))

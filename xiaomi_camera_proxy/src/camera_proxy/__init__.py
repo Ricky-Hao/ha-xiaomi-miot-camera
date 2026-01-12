@@ -6,4 +6,4 @@
 This version uses miot_kit for camera operations.
 """
 
-__version__ = "0.6.19"
+__version__ = "0.6.20"
