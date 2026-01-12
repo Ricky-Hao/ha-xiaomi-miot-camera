@@ -395,3 +395,9 @@ Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (exte
 ### Removed
 - RTSP port 8554 exposure (now internal only)
 - Dependency on HA go2rtc for WebRTC conversion
+
+## [0.6.1] - 2025-01-12
+
+### Changed
+- Simplified OAuth flow: now accepts a single Base64 string instead of separate code and state fields
+- Updated UI strings in English and Chinese

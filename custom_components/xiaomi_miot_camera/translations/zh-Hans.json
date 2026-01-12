@@ -8,10 +8,9 @@
             },
             "auth": {
                 "title": "小米账号登录",
-                "description": "请登录你的小米账号：\n\n**第一步：** 点击下方链接打开小米登录页面：\n[打开登录页面]({auth_url})\n\n**第二步：** 使用小米账号登录并授权。\n\n**第三步：** 授权成功后，页面会显示授权码。从 URL 或页面中复制 **code** 和 **state** 的值。\n\n**第四步：** 将 code 和 state 粘贴到下方，然后点击提交。",
+                "description": "请登录你的小米账号：\n\n**第一步：** 点击下方链接打开小米登录页面：\n[打开登录页面]({auth_url})\n\n**第二步：** 使用小米账号登录并授权。\n\n**第三步：** 授权成功后，页面会显示一串 Base64 字符串。复制完整的字符串。\n\n**第四步：** 将字符串粘贴到下方，然后点击提交。",
                 "data": {
-                    "code": "授权码",
-                    "state": "状态码"
+                    "oauth_result": "OAuth 结果（Base64 字符串）"
                 }
             },
             "cameras": {
@@ -24,12 +23,14 @@
         },
         "error": {
             "cannot_connect": "无法连接到小米云服务",
-            "invalid_auth": "认证无效。请检查你的授权码和状态码，或重新尝试授权。",
+            "invalid_auth": "认证无效。请重新尝试授权。",
+            "invalid_oauth_result": "OAuth 结果无效。请确保复制了完整的 Base64 字符串。",
             "unknown": "发生了意外错误"
         },
         "abort": {
             "already_configured": "此账号已配置",
-            "no_cameras": "未在你的小米账号中找到摄像头"
+            "no_cameras": "未在你的小米账号中找到摄像头",
+            "addon_not_available": "Camera Proxy 插件不可用。请从以下地址安装：{addon_url}"
         }
     },
     "options": {

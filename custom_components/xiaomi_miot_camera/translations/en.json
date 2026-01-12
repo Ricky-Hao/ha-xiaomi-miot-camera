@@ -8,10 +8,9 @@
             },
             "auth": {
                 "title": "Xiaomi Account Login",
-                "description": "Please authenticate with your Xiaomi account:\n\n**Step 1:** Click the link below to open Xiaomi login page:\n[Open Login Page]({auth_url})\n\n**Step 2:** Log in with your Xiaomi account and authorize.\n\n**Step 3:** After successful authorization, the page will display the authorization info. Copy the **code** and **state** values from the URL or page.\n\n**Step 4:** Paste the code and state below, then click Submit.",
+                "description": "Please authenticate with your Xiaomi account:\n\n**Step 1:** Click the link below to open Xiaomi login page:\n[Open Login Page]({auth_url})\n\n**Step 2:** Log in with your Xiaomi account and authorize.\n\n**Step 3:** After successful authorization, the page will display a Base64 string. Copy the entire string.\n\n**Step 4:** Paste the Base64 string below, then click Submit.",
                 "data": {
-                    "code": "Authorization Code",
-                    "state": "State"
+                    "oauth_result": "OAuth Result (Base64 string)"
                 }
             },
             "cameras": {
@@ -24,12 +23,14 @@
         },
         "error": {
             "cannot_connect": "Failed to connect to Xiaomi cloud service",
-            "invalid_auth": "Invalid authentication. Please check your code and state values, or try the authorization again.",
+            "invalid_auth": "Invalid authentication. Please try the authorization again.",
+            "invalid_oauth_result": "Invalid OAuth result. Please make sure you copied the complete Base64 string.",
             "unknown": "An unexpected error occurred"
         },
         "abort": {
             "already_configured": "This account is already configured",
-            "no_cameras": "No cameras found in your Xiaomi account"
+            "no_cameras": "No cameras found in your Xiaomi account",
+            "addon_not_available": "Camera Proxy Add-on is not available. Please install it from: {addon_url}"
         }
     },
     "options": {

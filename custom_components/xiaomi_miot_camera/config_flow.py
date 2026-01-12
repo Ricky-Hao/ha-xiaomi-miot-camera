@@ -11,6 +11,8 @@ The flow is:
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
 from typing import Any
 
@@ -114,31 +116,44 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_auth(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the auth step - user authenticates via OAuth."""
+        """Handle the auth step - user pastes base64 OAuth result."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            code = user_input.get("code", "").strip()
-            state = user_input.get("state", "").strip()
+            oauth_result = user_input.get("oauth_result", "").strip()
 
-            if code and state:
+            if oauth_result:
                 try:
-                    # Send callback to Add-on
-                    success = await self._proxy_client.handle_oauth_callback_async(code, state)
+                    # Decode base64 string
+                    decoded = base64.b64decode(oauth_result).decode("utf-8")
+                    oauth_data = json.loads(decoded)
                     
-                    if success:
-                        _LOGGER.info("OAuth authentication successful")
+                    code = oauth_data.get("code", "").strip()
+                    state = oauth_data.get("state", "").strip()
+                    
+                    if code and state:
+                        # Send callback to Add-on
+                        success = await self._proxy_client.handle_oauth_callback_async(code, state)
                         
-                        # Store minimal oauth info (Add-on manages the actual tokens)
-                        self._oauth_info = {
-                            "access_token": "managed_by_addon",
-                            "refresh_token": "managed_by_addon",
-                            "expires_ts": 0,
-                        }
-                        
-                        return await self.async_step_cameras()
+                        if success:
+                            _LOGGER.info("OAuth authentication successful")
+                            
+                            # Store minimal oauth info (Add-on manages the actual tokens)
+                            self._oauth_info = {
+                                "access_token": "managed_by_addon",
+                                "refresh_token": "managed_by_addon",
+                                "expires_ts": 0,
+                            }
+                            
+                            return await self.async_step_cameras()
+                        else:
+                            errors["base"] = "invalid_auth"
                     else:
+                        _LOGGER.error("Missing code or state in OAuth result")
                         errors["base"] = "invalid_auth"
+                except (ValueError, json.JSONDecodeError) as err:
+                    _LOGGER.error("Failed to decode OAuth result: %s", err)
+                    errors["base"] = "invalid_oauth_result"
                 except Exception as err:
                     _LOGGER.error("OAuth callback failed: %s", err)
                     errors["base"] = "invalid_auth"
@@ -148,8 +163,7 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="auth",
             data_schema=vol.Schema({
-                vol.Required("code"): str,
-                vol.Required("state"): str,
+                vol.Required("oauth_result"): str,
             }),
             errors=errors,
             description_placeholders={
