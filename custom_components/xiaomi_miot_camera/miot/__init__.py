@@ -4,10 +4,8 @@
 """
 MIoT Camera utilities.
 
-This module provides:
+Modules:
 - proxy_client: HTTP client for Camera Proxy Add-on
 - camera_backend: Camera backend using the Add-on
 - types: MIoT data types
-- error: Error definitions
-- common: Common utilities
 """

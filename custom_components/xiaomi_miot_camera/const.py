@@ -10,7 +10,6 @@ PLATFORMS: Final = ["camera"]
 # Configuration keys
 CONF_CLOUD_SERVER: Final = "cloud_server"
 CONF_OAUTH_INFO: Final = "oauth_info"
-CONF_CAMERAS: Final = "cameras"
 CONF_SELECTED_CAMERAS: Final = "selected_cameras"
 
 # Default values
@@ -28,9 +27,6 @@ CLOUD_SERVERS: Final = {
     "sg": "Singapore",
     "us": "United States"
 }
-
-# OAuth2 redirect URI - uses Xiaomi's official redirect page
-OAUTH2_REDIRECT_URI: Final = "https://mico.api.mijia.tech/login_redirect"
 
 # OAuth callback path in Home Assistant
 OAUTH_CALLBACK_PATH: Final = "/api/xiaomi_miot_camera/callback"

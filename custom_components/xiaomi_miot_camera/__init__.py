@@ -14,9 +14,7 @@ from .const import (
     PLATFORMS,
     CONF_CLOUD_SERVER,
     CONF_OAUTH_INFO,
-    CONF_UUID,
     CONF_SELECTED_CAMERAS,
-    DEFAULT_FRAME_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
