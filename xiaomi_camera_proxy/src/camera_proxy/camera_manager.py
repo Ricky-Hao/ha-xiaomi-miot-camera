@@ -339,27 +339,57 @@ class CameraInstance:
                     )
 
                 # Decode to JPG (for camera_image / snapshots)
-                # Only decode periodically to save CPU
+                # Only decode keyframes to save CPU
                 _LOGGER.debug(
                     "Video frame: codec=%d, len=%d, frame_type=%d",
                     codec_id, len(frame_data), frame_type
                 )
                 
-                # Only decode I-frames for snapshots (save CPU)
-                if frame_type == 1 and self._jpg_callbacks.get(channel):  # I-frame
+                # Detect keyframe (I-frame/IDR)
+                # frame_type from native lib may not be reliable for H.265
+                # Also check NAL type: H.265 IDR NAL types are 19 (IDR_W_RADL) and 20 (IDR_N_LP)
+                # H.264 IDR NAL type is 5
+                is_keyframe = frame_type == 1
+                if not is_keyframe and len(frame_data) > 1000:
+                    # Check NAL header for keyframe detection
+                    # Look for start code (00 00 00 01 or 00 00 01)
+                    nal_start = -1
+                    if frame_data[:4] == b'\x00\x00\x00\x01':
+                        nal_start = 4
+                    elif frame_data[:3] == b'\x00\x00\x01':
+                        nal_start = 3
+                    
+                    if nal_start > 0 and len(frame_data) > nal_start:
+                        nal_byte = frame_data[nal_start]
+                        if codec_id == MIoTCameraCodec.VIDEO_H265:
+                            # H.265: NAL type is in bits 1-6 of first byte
+                            nal_type = (nal_byte >> 1) & 0x3F
+                            # VPS=32, SPS=33, PPS=34, IDR_W_RADL=19, IDR_N_LP=20
+                            is_keyframe = nal_type in (19, 20, 32, 33, 34)
+                        else:
+                            # H.264: NAL type is in bits 0-4 of first byte
+                            nal_type = nal_byte & 0x1F
+                            # SPS=7, PPS=8, IDR=5
+                            is_keyframe = nal_type in (5, 7, 8)
+                        
+                        if is_keyframe:
+                            _LOGGER.debug("Detected keyframe by NAL type: %d", nal_type)
+                
+                # Decode keyframes for snapshots
+                if is_keyframe and self._jpg_callbacks.get(channel):
                     try:
                         jpg_data = self._decoder.decode_to_jpg(
                             frame_data, codec_id, stream_id=f"{self._did}_{channel}"
                         )
                         if jpg_data:
-                            _LOGGER.debug("Decoded I-frame to JPG: %d bytes", len(jpg_data))
+                            _LOGGER.debug("Decoded keyframe to JPG: %d bytes", len(jpg_data))
                             for cb in self._jpg_callbacks.get(channel, []):
                                 asyncio.run_coroutine_threadsafe(
                                     cb(self._did, jpg_data, timestamp, channel),
                                     self._main_loop
                                 )
                     except Exception as e:
-                        _LOGGER.debug("Failed to decode I-frame: %s", e)
+                        _LOGGER.debug("Failed to decode keyframe: %s", e)
 
             # Audio frame
             elif is_audio:

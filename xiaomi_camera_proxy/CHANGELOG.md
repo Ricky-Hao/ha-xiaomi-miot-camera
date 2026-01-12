@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.4] - 2026-01-12
+
+### Fixed
+- **Fix snapshot/thumbnail generation**: Detect H.265 keyframes by NAL type instead of unreliable frame_type
+- Parse NAL header to find IDR frames (type 19/20 for H.265, type 5 for H.264)
+- Also detect VPS/SPS/PPS frames as keyframe candidates
+- Fixes camera_proxy thumbnail requests returning empty
+
 ## [0.3.3] - 2026-01-12
 
 ### Fixed
