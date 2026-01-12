@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.20] - 2026-01-12 (Add-on)
+
+### Changed
+- **Enhanced FFmpeg debugging**: Added detailed logging for FFmpeg output
+- **Improved FFmpeg startup**: Added probesize/analyzeduration settings for faster stream initialization
+- **Better frame logging**: Log first frame header bytes to debug codec detection
+- **Wait for FFmpeg**: Brief delay after starting FFmpeg before pushing frames
+
 ## [0.4.15] - 2026-01-12 (Integration)
 
 ### Fixed

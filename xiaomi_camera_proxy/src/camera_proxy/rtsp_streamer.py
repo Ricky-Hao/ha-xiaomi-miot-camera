@@ -133,15 +133,22 @@ class RTSPStreamer:
             
             _LOGGER.info("Using codec: %s (codec_id=%d)", input_format, codec_id)
             
-            # FFmpeg command: stdin (H.264/H.265) -> RTSP (no transcoding)
+            # FFmpeg command: stdin (H.264/H.265 Annex B) -> RTSP (no transcoding)
+            # Key settings:
+            # - probesize/analyzeduration: fast startup, don't wait for too many frames
+            # - fflags +genpts: generate timestamps if missing
+            # - rtpflags latm: low-latency RTP flags
             cmd = [
                 "ffmpeg",
                 "-hide_banner",
-                "-loglevel", "warning",
-                # Input: raw video from stdin
+                "-loglevel", "info",  # Changed to info for debugging
+                # Input settings
+                "-probesize", "32",  # Minimum probe size for faster startup
+                "-analyzeduration", "0",  # Don't analyze, just start
+                "-fflags", "+genpts+discardcorrupt",  # Generate PTS, discard corrupt
                 "-f", input_format,
                 "-i", "pipe:0",
-                # Output: copy codec (no transcoding!), RTSP
+                # Output: copy codec, RTSP
                 "-c:v", "copy",
                 "-f", "rtsp",
                 "-rtsp_transport", "tcp",
@@ -181,7 +188,7 @@ class RTSPStreamer:
             return False
 
     async def _error_monitor(self, stream_key: str, process: subprocess.Popen):
-        """Monitor FFmpeg stderr for errors."""
+        """Monitor FFmpeg stderr for errors and info."""
         try:
             loop = asyncio.get_event_loop()
             while process.poll() is None:
@@ -190,7 +197,12 @@ class RTSPStreamer:
                     None, process.stderr.readline
                 )
                 if line:
-                    _LOGGER.warning("FFmpeg [%s]: %s", stream_key, line.decode().strip())
+                    line_str = line.decode().strip()
+                    # Log everything from FFmpeg for debugging
+                    if "error" in line_str.lower():
+                        _LOGGER.error("FFmpeg [%s]: %s", stream_key, line_str)
+                    else:
+                        _LOGGER.info("FFmpeg [%s]: %s", stream_key, line_str)
         except Exception as e:
             _LOGGER.debug("Error monitor ended for %s: %s", stream_key, e)
 
@@ -244,7 +256,7 @@ class RTSPStreamer:
         
         Args:
             did: Device ID
-            frame_data: Raw H.264/H.265 NAL unit
+            frame_data: Raw H.264/H.265 NAL unit (Annex B format with start codes)
             channel: Camera channel
         """
         stream_key = f"{did}_{channel}"
@@ -260,14 +272,21 @@ class RTSPStreamer:
                 detected = 5  # Default to H.265 for modern cameras
             self._detected_codecs[stream_key] = detected
             codec_name = "H.265/HEVC" if detected == 5 else "H.264"
-            _LOGGER.info("Auto-detected codec for %s: %s (codec_id=%d)", 
-                        stream_key, codec_name, detected)
+            
+            # Debug: log first frame header bytes
+            header_hex = frame_data[:20].hex() if len(frame_data) >= 20 else frame_data.hex()
+            _LOGGER.info(
+                "First frame for %s: codec=%s, size=%d, header=%s", 
+                stream_key, codec_name, len(frame_data), header_hex
+            )
         
         # Start FFmpeg if not running (deferred start)
         if not self._is_stream_running(stream_key):
             codec_id = self._detected_codecs.get(stream_key, 5)
             _LOGGER.info("Starting FFmpeg for %s with codec_id=%d", stream_key, codec_id)
             await self._start_ffmpeg(stream_key, codec_id)
+            # Give FFmpeg a moment to start and connect to MediaMTX
+            await asyncio.sleep(0.5)
         
         # Count frames
         self._frame_counts[stream_key] = self._frame_counts.get(stream_key, 0) + 1
