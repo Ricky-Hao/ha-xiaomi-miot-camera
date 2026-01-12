@@ -262,6 +262,12 @@ class CameraService:
             instance = await self._camera_manager.create_camera_async(camera_info)
             self._active_cameras[did] = instance
             
+            # Start RTSP streams first (before registering callbacks)
+            if self._rtsp_streamer:
+                for channel in range(camera_info.channel_count):
+                    await self._rtsp_streamer.start_stream(did, channel)
+                    _LOGGER.info("Started RTSP stream for %s channel %d", did, channel)
+            
             # Register callbacks for each channel
             for channel in range(camera_info.channel_count):
                 # Raw video -> RTSP
