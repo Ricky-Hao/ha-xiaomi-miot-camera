@@ -407,7 +407,9 @@ class CameraService:
     def _get_channel_count(self, model: str, extra_info) -> int:
         """Get channel count for a camera model."""
         if model in extra_info.extra_info:
-            return extra_info.extra_info[model].get("channel_count", 1)
+            item = extra_info.extra_info[model]
+            # MIoTCameraExtraItem is a Pydantic model, access attribute directly
+            return item.channel_count if item.channel_count else 1
         return 1
 
     async def _on_raw_video_frame(
