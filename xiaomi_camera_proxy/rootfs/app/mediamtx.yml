@@ -1,0 +1,65 @@
+# MediaMTX configuration for Xiaomi Camera Proxy
+# This RTSP server receives H.264 streams from cameras and serves them on-demand
+
+###############################################
+# Global settings
+
+logLevel: info
+logDestinations: [stdout]
+
+###############################################
+# RTSP server
+
+rtsp: yes
+protocols: [tcp]
+rtspAddress: :8554
+
+###############################################
+# WebRTC (disabled for now)
+
+webrtc: no
+
+###############################################
+# HLS (disabled for now)
+
+hls: no
+
+###############################################
+# API
+
+api: yes
+apiAddress: :9997
+
+###############################################
+# Path defaults
+# Paths are created dynamically via API
+
+pathDefaults:
+  # Source settings
+  source: publisher
+  sourceOnDemand: yes
+  sourceOnDemandStartTimeout: 10s
+  sourceOnDemandCloseAfter: 10s
+  
+  # Recording (disabled)
+  record: no
+  
+  # Overwrite stream (allow new publisher to take over)
+  overridePublisher: yes
+  
+  # Read timeout
+  readTimeout: 10s
+  writeTimeout: 10s
+
+###############################################
+# Paths
+# Camera streams will be published to /camera/{did}/{channel}
+# Example: rtsp://localhost:8554/camera/123456789/0
+
+paths:
+  # Dynamic paths - cameras register themselves
+  ~^camera/(.+)/(\d+)$:
+    # On-demand: stream starts when someone connects, stops when everyone disconnects
+    sourceOnDemand: yes
+    sourceOnDemandStartTimeout: 10s
+    sourceOnDemandCloseAfter: 10s

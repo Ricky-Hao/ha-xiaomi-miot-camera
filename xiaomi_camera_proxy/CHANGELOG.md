@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.0] - 2026-01-12
+
+### Added
+- **RTSP streaming support** via mediamtx server
+- **On-demand streaming** - camera only starts when someone is viewing
+- Live H.264 stream pushed to RTSP (no transcoding, low CPU usage)
+- FFmpeg integration for RTSP remuxing
+
+### Changed
+- Architecture: Add-on now provides RTSP streams instead of JPEG over WebSocket
+- Integration: Camera entity now has `stream_source` property for native HA streaming
+- JPEG decoding: Only decode I-frames for snapshots (saves CPU)
+- Bandwidth: Reduced by 5-10x (H.264 vs JPEG)
+
+### Technical
+- Installed mediamtx v1.9.3 (RTSP server)
+- Installed FFmpeg for H.264 remuxing
+- RTSP port 8554 exposed alongside WebSocket 8765
+
 ## [0.2.8] - 2026-01-12
 
 ### Fixed

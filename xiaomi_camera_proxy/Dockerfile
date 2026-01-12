@@ -13,7 +13,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     libgomp1 \
     jq \
+    curl \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+
+# Install mediamtx (RTSP server)
+ARG TARGETARCH
+RUN MEDIAMTX_VERSION="1.9.3" && \
+    if [ "$TARGETARCH" = "amd64" ]; then ARCH="linux_amd64"; \
+    elif [ "$TARGETARCH" = "arm64" ]; then ARCH="linux_arm64v8"; \
+    else echo "Unsupported architecture: $TARGETARCH" && exit 1; fi && \
+    curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}/mediamtx_v${MEDIAMTX_VERSION}_${ARCH}.tar.gz" | \
+    tar -xzf - -C /usr/local/bin mediamtx && \
+    chmod +x /usr/local/bin/mediamtx
 
 # Create virtual environment
 RUN python3 -m venv /opt/venv

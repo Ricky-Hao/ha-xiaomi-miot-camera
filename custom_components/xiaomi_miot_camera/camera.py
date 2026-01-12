@@ -11,6 +11,7 @@ from aiohttp import web
 
 from homeassistant.components.camera import (
     Camera,
+    CameraEntityFeature,
     async_get_still_stream,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -56,8 +57,8 @@ class XiaomiMiotCamera(Camera):
     """Xiaomi MIoT Camera entity."""
 
     _attr_has_entity_name = True
-    # Note: We don't support CameraEntityFeature.STREAM because we don't have RTSP URL
-    # We provide MJPEG streaming via handle_async_mjpeg_stream instead
+    # Support STREAM feature - RTSP streaming via Camera Proxy Add-on
+    _attr_supported_features = CameraEntityFeature.STREAM
 
     def __init__(
         self,
@@ -112,6 +113,13 @@ class XiaomiMiotCamera(Camera):
     def is_on(self) -> bool:
         """Return True if camera is on."""
         return True  # Camera is always on
+
+    @property
+    def stream_source(self) -> str:
+        """Return the RTSP stream source URL."""
+        # RTSP stream provided by Camera Proxy Add-on
+        # Format: rtsp://127.0.0.1:8554/camera/{did}/{channel}
+        return f"rtsp://127.0.0.1:8554/camera/{self._did}/{self._channel}"
 
     @property
     def frame_interval(self) -> float:

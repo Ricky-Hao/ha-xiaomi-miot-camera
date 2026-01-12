@@ -144,22 +144,32 @@ Make sure the Camera Proxy Add-on is installed and running:
 ```
 ┌─────────────────────────────────────┐
 │  Home Assistant                     │
-│  └── Xiaomi MIoT Camera Component   │
-│      └── WebSocket Client ──────────┼──┐
-└─────────────────────────────────────┘  │
-                                         │ WebSocket (ws://127.0.0.1:8765)
-┌─────────────────────────────────────┐  │
-│  Camera Proxy Add-on (Debian)       │◄─┘
+│  └── Camera Entity                  │
+│      ├── stream_source: RTSP ───────┼──┐
+│      └── camera_image: JPEG ────────┼──┼──┐
+└─────────────────────────────────────┘  │  │
+                                         │  │ WebSocket
+                   RTSP (on-demand) ◄────┘  │ (snapshots)
+┌─────────────────────────────────────┐     │
+│  Camera Proxy Add-on (Debian)       │◄────┘
+│  ├── mediamtx (RTSP Server)         │
+│  │   └── On-demand streaming        │
 │  ├── libmiot_camera_lite.so         │
-│  ├── Video decoding (H264→JPEG)     │
+│  ├── H.264 → RTSP (FFmpeg)          │
+│  ├── I-frame → JPEG (snapshots)     │
 │  └── WebSocket Server               │
 └─────────────────────────────────────┘
 ```
 
-The integration communicates with the Camera Proxy Add-on via WebSocket. The add-on handles:
-- Native camera library (`libmiot_camera_lite.so`)
-- Video stream decoding (H264/H265 to JPEG)
-- Camera connection management
+**Key Features:**
+- **On-demand streaming**: Camera only starts when someone views it, stops automatically
+- **Low bandwidth**: H.264 direct streaming (5-10x smaller than JPEG)
+- **Low CPU**: No transcoding, only remuxing
+- **Native HA integration**: Uses Home Assistant's built-in stream component
+
+The integration provides two data paths:
+1. **Live streaming**: RTSP (H.264) for continuous viewing - handled by mediamtx
+2. **Snapshots**: JPEG over WebSocket for `camera.snapshot` service
 
 ## Privacy Note
 

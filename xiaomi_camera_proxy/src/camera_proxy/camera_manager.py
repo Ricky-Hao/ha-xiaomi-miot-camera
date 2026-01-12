@@ -143,7 +143,8 @@ class CameraInstance:
         manager: "CameraManager",
         did: str,
         model: str,
-        channel_count: int = 1
+        channel_count: int = 1,
+        rtsp_streamer: Optional["RTSPStreamer"] = None
     ):
         self._manager = manager
         self._did = did
@@ -153,9 +154,12 @@ class CameraInstance:
         self._callback_refs: Dict[str, Any] = {}
         self._main_loop = asyncio.get_event_loop()
 
-        # Decoder for JPG output
+        # Decoder for JPG output (for camera_image)
         from .decoder import MIoTMediaDecoder
         self._decoder = MIoTMediaDecoder(enable_hw_accel=False)
+
+        # RTSP streamer (for live streaming)
+        self._rtsp_streamer = rtsp_streamer
 
         # Callbacks
         self._status_callbacks: List[Callable] = []
@@ -231,11 +235,19 @@ class CameraInstance:
         if result != 0:
             raise RuntimeError(f"Failed to start camera: {result}")
 
+        # Start RTSP stream for live streaming
+        if self._rtsp_streamer:
+            await self._rtsp_streamer.start_stream(self._did, channel=0)
+
         _LOGGER.info("Started camera: %s", self._did)
 
     async def stop_async(self):
         """Stop camera streaming."""
         if self._c_instance:
+            # Stop RTSP stream
+            if self._rtsp_streamer:
+                await self._rtsp_streamer.stop_stream(self._did, channel=0)
+            
             self._manager.lib.miot_camera_stop(self._c_instance)
             _LOGGER.info("Stopped camera: %s", self._did)
 
@@ -297,8 +309,15 @@ class CameraInstance:
                         self._main_loop
                     )
 
-            # Video frame (H.264/H.265 - needs decoding)
+            # Video frame (H.264/H.265)
             elif is_video:
+                # Push to RTSP stream (for live streaming)
+                if self._rtsp_streamer:
+                    asyncio.run_coroutine_threadsafe(
+                        self._rtsp_streamer.push_frame(self._did, frame_data, channel),
+                        self._main_loop
+                    )
+                
                 # Raw video callbacks
                 for cb in self._raw_video_callbacks.get(channel, []):
                     asyncio.run_coroutine_threadsafe(
@@ -306,28 +325,28 @@ class CameraInstance:
                         self._main_loop
                     )
 
-                # Decode to JPG
+                # Decode to JPG (for camera_image / snapshots)
+                # Only decode periodically to save CPU
                 _LOGGER.debug(
-                    "Video frame: codec=%d, len=%d, frame_type=%d, decoding to JPG",
+                    "Video frame: codec=%d, len=%d, frame_type=%d",
                     codec_id, len(frame_data), frame_type
                 )
-                try:
-                    # Pass codec_id (4 or 5) directly to decoder
-                    jpg_data = self._decoder.decode_to_jpg(
-                        frame_data, codec_id, stream_id=f"{self._did}_{channel}"
-                    )
-                    if jpg_data:
-                        _LOGGER.debug(
-                            "Decoded JPG: %d bytes, callbacks: %s",
-                            len(jpg_data), list(self._jpg_callbacks.keys())
+                
+                # Only decode I-frames for snapshots (save CPU)
+                if frame_type == 1 and self._jpg_callbacks.get(channel):  # I-frame
+                    try:
+                        jpg_data = self._decoder.decode_to_jpg(
+                            frame_data, codec_id, stream_id=f"{self._did}_{channel}"
                         )
-                        for cb in self._jpg_callbacks.get(channel, []):
-                            asyncio.run_coroutine_threadsafe(
-                                cb(self._did, jpg_data, timestamp, channel),
-                                self._main_loop
-                            )
-                except Exception as e:
-                    _LOGGER.debug("Failed to decode frame: %s", e)
+                        if jpg_data:
+                            _LOGGER.debug("Decoded I-frame to JPG: %d bytes", len(jpg_data))
+                            for cb in self._jpg_callbacks.get(channel, []):
+                                asyncio.run_coroutine_threadsafe(
+                                    cb(self._did, jpg_data, timestamp, channel),
+                                    self._main_loop
+                                )
+                    except Exception as e:
+                        _LOGGER.debug("Failed to decode I-frame: %s", e)
 
             # Audio frame
             elif is_audio:
@@ -380,6 +399,10 @@ class CameraManager:
         self._cameras: Dict[str, CameraInstance] = {}
         self._log_handler: Optional[Any] = None
         self._initialized = False
+        
+        # RTSP streamer for live streaming
+        from .rtsp_streamer import RTSPStreamer
+        self._rtsp_streamer = RTSPStreamer()
 
     @property
     def lib(self) -> CDLL:
@@ -457,7 +480,8 @@ class CameraManager:
             manager=self,
             did=did,
             model=camera_info.get("model", "unknown"),
-            channel_count=camera_info.get("channel_count", 1)
+            channel_count=camera_info.get("channel_count", 1),
+            rtsp_streamer=self._rtsp_streamer
         )
         await camera.create_async()
         self._cameras[did] = camera
