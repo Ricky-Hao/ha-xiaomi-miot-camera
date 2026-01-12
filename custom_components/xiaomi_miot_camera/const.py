@@ -27,6 +27,3 @@ CLOUD_SERVERS: Final = {
     "sg": "Singapore",
     "us": "United States"
 }
-
-# OAuth callback path in Home Assistant
-OAUTH_CALLBACK_PATH: Final = "/api/xiaomi_miot_camera/callback"

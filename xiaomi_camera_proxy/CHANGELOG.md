@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.2] - 2026-01-12
+
+### Fixed
+- **Fix OAuth redirect_uri error**: Use Xiaomi's official redirect_uri (`https://mico.api.mijia.tech/login_redirect`) instead of custom HA callback URL
+- Users now manually copy code and state from Xiaomi's redirect page
+- Remove unused auth_callback.py (no longer needed with official redirect_uri)
+- Simplify config_flow.py
+
 ## [0.4.1] - 2026-01-12
 
 ### Changed

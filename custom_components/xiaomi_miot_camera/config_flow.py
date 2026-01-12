@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from uuid import uuid4
 
 import aiohttp
 import voluptuous as vol
@@ -22,7 +21,6 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.network import get_url
 
 from .const import (
     DOMAIN,
@@ -30,7 +28,6 @@ from .const import (
     CONF_OAUTH_INFO,
     CONF_SELECTED_CAMERAS,
     CLOUD_SERVERS,
-    OAUTH_CALLBACK_PATH,
 )
 from .miot.proxy_client import CameraProxyHttpClient
 
@@ -65,7 +62,7 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._cameras: dict = {}
         self._proxy_client: CameraProxyHttpClient | None = None
         self._auth_url: str = ""
-        self._ha_callback_url: str = ""
+        self._oauth_redirect_uri: str = ""
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -89,18 +86,15 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Initialize proxy client
             self._proxy_client = CameraProxyHttpClient(proxy_url=DEFAULT_PROXY_URL)
 
-            # Build HA callback URL
-            try:
-                ha_url = get_url(self.hass, prefer_external=True)
-            except Exception:
-                ha_url = get_url(self.hass, prefer_external=False)
-            self._ha_callback_url = f"{ha_url}{OAUTH_CALLBACK_PATH}"
+            # Use Xiaomi's official redirect URI (required by OAuth server)
+            # Users will be redirected to Xiaomi's page which shows the code
+            self._oauth_redirect_uri = "https://mico.api.mijia.tech/login_redirect"
 
             try:
                 # Get auth URL from Add-on
                 self._auth_url = await self._proxy_client.get_auth_url_async(
                     cloud_server=self._cloud_server,
-                    redirect_uri=self._ha_callback_url,
+                    redirect_uri=self._oauth_redirect_uri,
                 )
                 _LOGGER.info("Generated OAuth URL via Add-on")
                 return await self.async_step_auth()
@@ -156,13 +150,12 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="auth",
             data_schema=vol.Schema({
-                vol.Optional("code"): str,
-                vol.Optional("state"): str,
+                vol.Required("code"): str,
+                vol.Required("state"): str,
             }),
             errors=errors,
             description_placeholders={
                 "auth_url": self._auth_url,
-                "callback_url": self._ha_callback_url,
             },
         )
 

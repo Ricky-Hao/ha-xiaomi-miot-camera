@@ -21,23 +21,10 @@ _LOGGER = logging.getLogger(__name__)
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
-# Track if callback view has been registered
-_CALLBACK_VIEW_REGISTERED = False
-
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Xiaomi MIoT Camera component."""
-    global _CALLBACK_VIEW_REGISTERED
-    
     hass.data.setdefault(DOMAIN, {})
-    
-    # Register OAuth callback view (only once)
-    if not _CALLBACK_VIEW_REGISTERED:
-        from .auth_callback import register_oauth_callback_view
-        register_oauth_callback_view(hass)
-        _CALLBACK_VIEW_REGISTERED = True
-        _LOGGER.info("OAuth callback view registered")
-    
     return True
 
 
