@@ -295,7 +295,8 @@ class CameraService:
         This is called when the HA Integration is configured/reconfigured.
         The configured cameras will be:
         1. Saved to persistent storage for auto-start on Add-on boot
-        2. Immediately started if camera manager is ready
+        2. Stop all currently running cameras
+        3. Wait for cleanup, then start the newly configured cameras
         
         Args:
             camera_dids: List of camera device IDs configured in HA
@@ -317,10 +318,37 @@ class CameraService:
             _LOGGER.error("Failed to save configured cameras: %s", e)
             return
         
-        # Auto-start cameras immediately if camera manager is ready
+        # Auto-start cameras if camera manager is ready
         if self._camera_manager and camera_dids:
-            _LOGGER.info("Camera manager ready, auto-starting configured cameras")
-            asyncio.create_task(self._start_cameras_by_dids_async(camera_dids))
+            _LOGGER.info("Camera manager ready, scheduling camera restart")
+            asyncio.create_task(self._restart_cameras_async(camera_dids))
+
+    async def _restart_cameras_async(self, camera_dids: List[str]) -> None:
+        """Stop all cameras, wait for cleanup, then start configured cameras.
+        
+        Args:
+            camera_dids: List of camera device IDs to start
+        """
+        try:
+            # Stop all currently active cameras first
+            if self._active_cameras:
+                active_dids = list(self._active_cameras.keys())
+                _LOGGER.info("Stopping %d active cameras before restart: %s", len(active_dids), active_dids)
+                for did in active_dids:
+                    try:
+                        await self.stop_camera_async(did)
+                    except Exception as e:
+                        _LOGGER.warning("Error stopping camera %s: %s", did, e)
+                
+                # Wait for camera instances to fully release
+                _LOGGER.info("Waiting for camera cleanup...")
+                await asyncio.sleep(3)
+            
+            # Now start the configured cameras
+            _LOGGER.info("Starting configured cameras: %s", camera_dids)
+            await self._start_cameras_by_dids_async(camera_dids)
+        except Exception as e:
+            _LOGGER.error("Error in camera restart: %s", e)
 
     # ==================== Camera Control ====================
 
