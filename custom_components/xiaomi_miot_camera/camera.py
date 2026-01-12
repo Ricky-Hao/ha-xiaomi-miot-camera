@@ -10,7 +10,7 @@ This integration uses direct WebRTC streaming from the Add-on:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 import aiohttp
 from aiohttp import web
@@ -21,8 +21,9 @@ from homeassistant.components.camera import (
     async_get_still_stream,
 )
 from homeassistant.components.camera.webrtc import (
-    CameraWebRTCProvider,
-    async_register_webrtc_provider,
+    WebRTCAnswer,
+    WebRTCError,
+    WebRTCSendMessage,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -115,11 +116,13 @@ class XiaomiMiotCamera(Camera):
         """Return the frontend stream type."""
         return "web_rtc"
 
-    async def async_handle_web_rtc_offer(self, offer_sdp: str) -> str | None:
-        """Handle WebRTC offer and return answer.
+    async def async_handle_async_webrtc_offer(
+        self, offer_sdp: str, session_id: str, send_message: WebRTCSendMessage
+    ) -> None:
+        """Handle the async WebRTC offer.
         
-        This method is called by HA frontend when starting WebRTC stream.
-        We forward the SDP offer to MediaMTX WHEP endpoint and return the answer.
+        This is the new HA WebRTC API. We forward the SDP offer to MediaMTX WHEP
+        endpoint and send the answer via the callback.
         """
         # Ensure camera stream is started
         if not self._camera_data.is_streaming:
@@ -128,7 +131,8 @@ class XiaomiMiotCamera(Camera):
                 await self._coordinator.async_start_camera(self._did)
             except Exception as err:
                 _LOGGER.error("Failed to start camera %s: %s", self._did, err)
-                return None
+                send_message(WebRTCError("webrtc_offer_failed", f"Failed to start camera: {err}"))
+                return
         
         # Send SDP offer to MediaMTX WHEP endpoint
         try:
@@ -142,17 +146,17 @@ class XiaomiMiotCamera(Camera):
                     if resp.status == 201:
                         answer_sdp = await resp.text()
                         _LOGGER.debug("WebRTC answer received for camera %s", self._did)
-                        return answer_sdp
+                        send_message(WebRTCAnswer(answer_sdp))
                     else:
                         error_text = await resp.text()
                         _LOGGER.error(
                             "WebRTC WHEP failed for camera %s: %s %s",
                             self._did, resp.status, error_text
                         )
-                        return None
+                        send_message(WebRTCError("webrtc_offer_failed", f"WHEP error: {resp.status}"))
         except Exception as err:
             _LOGGER.error("WebRTC error for camera %s: %s", self._did, err)
-            return None
+            send_message(WebRTCError("webrtc_offer_failed", str(err)))
 
     @property
     def device_info(self) -> DeviceInfo:

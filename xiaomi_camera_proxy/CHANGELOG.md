@@ -442,3 +442,11 @@ Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (exte
 
 ### Changed
 - Remove ICE server config - not needed for local network access
+
+## [0.6.8] - 2026-01-12
+
+### Fixed
+- **Fix WebRTC not working**: Update to new HA WebRTC API
+  - Use `async_handle_async_webrtc_offer(offer_sdp, session_id, send_message)` instead of old `async_handle_web_rtc_offer`
+  - Use `WebRTCAnswer` and `WebRTCError` callback messages
+  - This is required for HA 2024.x+ WebRTC support
