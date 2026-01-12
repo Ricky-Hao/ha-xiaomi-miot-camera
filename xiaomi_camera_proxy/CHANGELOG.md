@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3] - 2026-01-12
+
+### Fixed
+- **Fix RTSP codec detection**: Start FFmpeg lazily on first video frame to detect actual codec
+- Properly detect H.265 (codec=5) vs H.264 (codec=4) and pass correct `-f hevc` or `-f h264` to FFmpeg
+- Fixes "data partitioning is not implemented" error when camera sends H.265 stream
+
 ## [0.3.2] - 2026-01-12
 
 ### Fixed

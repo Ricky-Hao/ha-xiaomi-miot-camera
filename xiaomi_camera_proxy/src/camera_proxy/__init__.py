@@ -1,4 +1,4 @@
 # -*- coding: utf-8 -*-
 """Xiaomi MIoT Camera Proxy - Add-on for Home Assistant."""
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"

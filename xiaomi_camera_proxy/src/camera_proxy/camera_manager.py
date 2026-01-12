@@ -238,9 +238,8 @@ class CameraInstance:
         if result != 0:
             raise RuntimeError(f"Failed to start camera: {result}")
 
-        # Start RTSP stream for live streaming
-        if self._rtsp_streamer:
-            await self._rtsp_streamer.start_stream(self._did, channel=0)
+        # Note: RTSP stream will be started lazily on first video frame
+        # This allows us to detect the correct codec (H.264 vs H.265)
 
         _LOGGER.info("Started camera: %s", self._did)
 
@@ -317,6 +316,14 @@ class CameraInstance:
 
             # Video frame (H.264/H.265)
             elif is_video:
+                # Start RTSP stream lazily on first video frame
+                # This allows us to detect the correct codec
+                if self._rtsp_streamer and self._frame_count == 1:
+                    asyncio.run_coroutine_threadsafe(
+                        self._rtsp_streamer.start_stream(self._did, channel, codec_id),
+                        self._main_loop
+                    )
+                
                 # Push to RTSP stream (for live streaming)
                 if self._rtsp_streamer:
                     asyncio.run_coroutine_threadsafe(

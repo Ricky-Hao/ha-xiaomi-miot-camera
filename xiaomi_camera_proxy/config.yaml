@@ -1,5 +1,5 @@
 name: Xiaomi MIoT Camera Proxy
-version: "0.3.2"
+version: "0.3.3"
 slug: xiaomi_camera_proxy
 description: Camera streaming proxy for Xiaomi MIoT cameras (RTSP streaming + native library)
 url: https://github.com/Ricky-Hao/ha-xiaomi-miot-camera

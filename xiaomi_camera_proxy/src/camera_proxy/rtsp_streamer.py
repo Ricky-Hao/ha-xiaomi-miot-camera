@@ -26,12 +26,13 @@ class RTSPStreamer:
         self._error_tasks: Dict[str, asyncio.Task] = {}
         self._frame_counts: Dict[str, int] = {}
 
-    async def start_stream(self, did: str, channel: int = 0) -> bool:
+    async def start_stream(self, did: str, channel: int = 0, codec_id: int = 4) -> bool:
         """Start RTSP stream for a camera.
         
         Args:
             did: Device ID
             channel: Camera channel number
+            codec_id: Video codec (4=H.264, 5=H.265/HEVC)
             
         Returns:
             True if started successfully
@@ -45,13 +46,22 @@ class RTSPStreamer:
             # RTSP URL: rtsp://localhost:8554/camera/{did}/{channel}
             rtsp_url = f"rtsp://localhost:8554/camera/{did}/{channel}"
             
-            # FFmpeg command: stdin (H.264) -> RTSP (no transcoding)
+            # Determine input format based on codec
+            # MIoT codec IDs: VIDEO_H264=4, VIDEO_H265/HEVC=5
+            if codec_id == 5:
+                input_format = "hevc"
+            else:
+                input_format = "h264"
+            
+            _LOGGER.info("Using codec: %s (codec_id=%d)", input_format, codec_id)
+            
+            # FFmpeg command: stdin (H.264/H.265) -> RTSP (no transcoding)
             cmd = [
                 "ffmpeg",
                 "-hide_banner",
-                "-loglevel", "info",  # Changed to info to see more output
-                # Input: raw H.264 from stdin
-                "-f", "h264",
+                "-loglevel", "warning",
+                # Input: raw video from stdin
+                "-f", input_format,
                 "-i", "pipe:0",
                 # Output: copy codec (no transcoding!), RTSP
                 "-c:v", "copy",
