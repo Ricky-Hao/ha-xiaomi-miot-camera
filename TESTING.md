@@ -1,14 +1,17 @@
-# Testing RTSP Streaming (v0.3.0)
+# Testing WebRTC Streaming (v0.4.18)
 
-## What Changed
+## Architecture Overview
 
-### Before (v0.2.8)
-- Camera sends H.264 → Decode to JPEG → WebSocket → HA
-- CPU intensive, high bandwidth, always running
+### Current Design (WebRTC Only)
+```
+Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (external)
+```
 
-### After (v0.3.0)
-- Camera sends H.264 → RTSP server (mediamtx) → HA stream component
-- Low CPU, low bandwidth, **on-demand only**
+**Key Points:**
+- WebRTC is the only external streaming protocol
+- RTSP is internal only (FFmpeg → MediaMTX)
+- Instant playback with <1s latency
+- No HLS, no external RTSP
 
 ## Testing Steps
 
@@ -16,97 +19,127 @@
 
 ```bash
 cd /workspaces/ha-xiaomi-miot-camera
-# Build will install mediamtx + ffmpeg
-docker build -t test-addon xiaomi_camera_proxy/
+docker build -t xiaomi_camera_proxy xiaomi_camera_proxy/
 ```
 
 ### 2. Check Services Running
 
-After starting the add-on, verify:
+After starting the add-on, verify in logs:
 
-```bash
-# Check add-on logs
-# Should see:
-# - "Starting mediamtx RTSP server..."
-# - "Starting Xiaomi MIoT Camera Proxy v0.3.0"
+```
+Starting mediamtx RTSP server...
+Starting Xiaomi MIoT Camera Proxy v0.4.18 (using miot_kit)
+Server started on 0.0.0.0:8765
 ```
 
-### 3. Verify RTSP Stream
+### 3. Verify WebRTC Stream
 
 When you open a camera in HA:
 
 **Expected flow:**
-1. HA requests stream → calls `camera.stream_source`
-2. Returns `rtsp://127.0.0.1:8554/camera/{did}/0`
-3. HA stream component connects to RTSP
-4. mediamtx starts the camera automatically (on-demand)
-5. H.264 frames pushed to RTSP by camera_manager
-6. Stream appears in HA
+1. Camera entity has `StreamType.WEB_RTC`
+2. HA frontend sends WebRTC offer to camera entity
+3. Entity calls `async_handle_web_rtc_offer()`
+4. Integration forwards offer to MediaMTX WHEP endpoint
+5. MediaMTX returns SDP answer
+6. WebRTC connection established
+7. Video plays instantly
 
 **Check add-on logs:**
 ```
-Started RTSP stream: {did}_0 -> rtsp://localhost:8554/camera/{did}/0
-Video frame: codec=4, len=XXXX, frame_type=1  # H.264 frames
+Camera XXX already streaming and ready, returning immediately
 ```
 
-### 4. Test On-Demand
+### 4. Test Snapshots
 
-**When viewing stops:**
-- Wait 10 seconds (configured in mediamtx.yml)
-- mediamtx should auto-stop the stream
-- Camera stops sending frames
+`camera.snapshot` service should work:
+- Uses HTTP API: `GET /snapshot/{did}/{channel}`
+- Returns JPEG from decoded I-frames
+
+```yaml
+service: camera.snapshot
+target:
+  entity_id: camera.living_room
+data:
+  filename: /config/snapshot.jpg
+```
+
+### 5. Test Connection Release
+
+When stopping a camera:
 
 **Check logs:**
 ```
-Stopped RTSP stream: {did}_0
+Stopped camera: XXX (connection released)
+Destroyed camera instance: XXX
 ```
 
-### 5. Test Snapshots
-
-`camera.snapshot` service should still work:
-- Uses JPEG over WebSocket (I-frames only)
-- Independent of RTSP streaming
+Each camera should have exactly one connection.
 
 ## Ports
 
-- **8765**: WebSocket (control + snapshots)
-- **8554**: RTSP streaming
-- **9997**: mediamtx API (internal)
+| Port | Protocol | Description |
+|------|----------|-------------|
+| 8765 | HTTP | API (OAuth, control, snapshots) |
+| 8889 | HTTP | WebRTC (WHEP protocol) |
+| 8554 | RTSP | Internal only (FFmpeg → MediaMTX) |
+| 9997 | HTTP | MediaMTX API (internal) |
 
 ## Troubleshooting
 
 ### Stream not appearing
 
 1. Check mediamtx is running: `ps aux | grep mediamtx`
-2. Check ffmpeg is available: `which ffmpeg`
-3. Check RTSP port: `netstat -ln | grep 8554`
+2. Check port 8889 is accessible
+3. Verify WebRTC is enabled in mediamtx.yml
+4. Check browser supports WebRTC
 
-### High CPU usage
+### WebRTC connection failed
 
-- Should only see CPU usage when **actively viewing**
-- If always high → check camera isn't stuck streaming
+1. Check WHEP endpoint: `curl -X POST http://localhost:8889/camera/{did}/0/whep`
+2. Check MediaMTX API: `curl http://localhost:9997/v3/paths/list`
+3. Verify camera is streaming (check RTSP input)
 
-### No on-demand behavior
+### Too many connections
 
-Check mediamtx config:
-```yaml
-# In mediamtx.yml
-sourceOnDemand: yes
-sourceOnDemandCloseAfter: 10s
+1. Ensure `destroy_camera_async()` is called on stop
+2. Check add-on logs for "connection released"
+3. Restart add-on to clear stuck connections
+
+## Performance
+
+| Metric | Value |
+|--------|-------|
+| Latency | <1 second |
+| Protocol | WebRTC (WHEP) |
+| Codec | H.264/H.265 (passthrough) |
+| CPU Usage | Minimal (no transcoding) |
+
+## API Testing
+
+### Health Check
+```bash
+curl http://localhost:8765/health
+# {"status": "ok", "version": "0.4.18", ...}
 ```
 
-## Performance Comparison
+### Start Camera
+```bash
+curl -X POST http://localhost:8765/camera/{did}/start \
+  -H "Content-Type: application/json" \
+  -d '{"quality": 2}'
+# {"status": "ok"}
+```
 
-| Metric | Before (JPEG) | After (RTSP) |
-|--------|---------------|--------------|
-| Bandwidth | ~5-10 Mbps | ~1 Mbps |
-| CPU (idle) | 10-20% | 0% |
-| CPU (viewing) | 30-50% | 5-10% |
-| Latency | 2-3s | 0.5-1s |
+### Get Snapshot
+```bash
+curl http://localhost:8765/snapshot/{did}/0 -o snapshot.jpg
+```
 
-## Next Steps
-
-If testing successful:
-1. Update version in manifest
-2. Create GitHub release
-3. Update HACS repository
+### WebRTC WHEP
+```bash
+curl -X POST http://localhost:8889/camera/{did}/0/whep \
+  -H "Content-Type: application/sdp" \
+  -d "{SDP_OFFER}"
+# Returns SDP Answer
+```

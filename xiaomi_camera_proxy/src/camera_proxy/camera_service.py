@@ -7,7 +7,7 @@ Camera Service - Main service that manages cameras using miot_kit.
 This service handles:
 - OAuth authentication flow
 - Device discovery from cloud
-- Camera streaming via RTSP
+- Camera streaming via WebRTC (FFmpeg → RTSP → MediaMTX → WebRTC)
 - Snapshot generation
 """
 import asyncio
@@ -261,11 +261,11 @@ class CameraService:
         """Start streaming a camera.
         
         Behavior:
-        - If camera is already active AND RTSP stream is ready: returns immediately (0 delay)
+        - If camera is already active AND stream is ready: returns immediately (0 delay)
         - If camera is already active but stream not ready: waits for stream
         - If camera is not active: starts camera and waits for stream to be ready
         
-        This ensures HLS playlist generation doesn't block waiting for RTSP data.
+        This ensures WebRTC stream is ready when user opens camera.
         """
         if not self._camera_manager:
             raise ValueError("Camera manager not initialized")
@@ -336,8 +336,8 @@ class CameraService:
         # Save active cameras for auto-restart on Add-on reboot
         await self._save_active_cameras_async()
         
-        # Always wait for RTSP stream to be ready for new cameras
-        # This ensures HLS can start immediately when user opens camera
+        # Always wait for stream to be ready for new cameras
+        # This ensures WebRTC can start immediately when user opens camera
         if self._rtsp_streamer:
             for channel in range(camera_info.channel_count):
                 await self._wait_for_stream_ready_async(did, channel)

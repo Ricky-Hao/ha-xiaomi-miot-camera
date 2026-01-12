@@ -94,8 +94,8 @@ class CameraBackend:
         pin_code: Optional[str] = None,
         quality: MIoTCameraVideoQuality = MIoTCameraVideoQuality.HIGH,
         enable_audio: bool = False,
-    ) -> str:
-        """Start camera streaming. Returns RTSP URL."""
+    ) -> bool:
+        """Start camera streaming. Returns success status."""
         if not self._client:
             raise RuntimeError("Backend not initialized")
         

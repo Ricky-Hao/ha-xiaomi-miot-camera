@@ -1,12 +1,16 @@
 # Xiaomi Camera Proxy Add-on
 
-Camera streaming proxy for Xiaomi MIoT cameras.
+Camera streaming proxy for Xiaomi MIoT cameras with WebRTC support.
 
 ## About
 
-This add-on is **required** for the Xiaomi MIoT Camera integration. It provides a WebSocket proxy server that runs the native `libmiot_camera_lite.so` library and handles video decoding.
+This add-on is **required** for the Xiaomi MIoT Camera integration. It provides:
 
-The add-on runs in a Debian-based container with glibc, which is necessary because the native camera library is compiled with glibc.
+- **WebRTC streaming** via MediaMTX for instant, low-latency video playback
+- **HTTP API** for camera control and OAuth authentication
+- **Native camera library** (miot_kit) for Xiaomi cloud communication
+
+The add-on runs in a Debian-based container with glibc, which is necessary because the native camera library requires glibc.
 
 ## How It Works
 
@@ -14,16 +18,27 @@ The add-on runs in a Debian-based container with glibc, which is necessary becau
 ┌─────────────────────────────────────┐
 │  Home Assistant                     │
 │  └── Xiaomi MIoT Camera Integration │
-│      └── WebSocket Client ──────────┼──┐
+│      ├── WebRTC (WHEP) ─────────────┼──► Port 8889 (MediaMTX)
+│      └── HTTP API ──────────────────┼──┐
 └─────────────────────────────────────┘  │
                                          │ Port 8765
 ┌─────────────────────────────────────┐  │
-│  Camera Proxy Add-on (Debian/glibc) │  │
-│  ├── WebSocket Server ◄─────────────┼──┘
-│  ├── Native Library (glibc)         │
-│  ├── H264/H265 Video Decoding       │
-│  └── JPEG Frame Output              │
+│  Camera Proxy Add-on (Debian/glibc) │◄─┘
+│  ├── HTTP API Server                │
+│  │   ├── OAuth authentication       │
+│  │   ├── Device discovery           │
+│  │   ├── Camera control             │
+│  │   └── Snapshots                  │
+│  ├── MediaMTX (WebRTC Server)       │
+│  │   └── WHEP protocol (port 8889)  │
+│  ├── FFmpeg (RTP encapsulation)     │
+│  └── miot_kit (camera library)      │
 └─────────────────────────────────────┘
+```
+
+**Data Flow:**
+```
+Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (external)
 ```
 
 ## Installation
@@ -47,35 +62,70 @@ log_level: info  # debug, info, warning, error
 |--------|-------------|---------|
 | `log_level` | Logging verbosity | `info` |
 
-## WebSocket API
+## Ports
 
-The add-on exposes a WebSocket API on port 8765 for internal use by the integration.
+| Port | Protocol | Description |
+|------|----------|-------------|
+| 8765 | HTTP | API server (OAuth, devices, control, snapshots) |
+| 8889 | HTTP | WebRTC streaming (WHEP protocol) |
 
-### Message Format
+## HTTP API
 
-All messages are JSON:
+The add-on exposes a REST API on port 8765.
 
-```json
-{
-  "type": "message_type",
-  "id": "unique_message_id",
-  ...params
-}
+### Endpoints
+
+#### Health & Info
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Health check |
+| GET | `/info` | Server info and status |
+
+#### OAuth
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/oauth/servers` | Get supported cloud servers |
+| POST | `/oauth/auth_url` | Get OAuth authorization URL |
+| POST | `/oauth/callback` | Handle OAuth callback |
+| POST | `/oauth/set_tokens` | Set tokens directly |
+| POST | `/oauth/refresh` | Refresh access token |
+
+#### Devices
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/devices` | Get all devices |
+| GET | `/cameras` | Get discovered cameras |
+
+#### Camera Control
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/camera/{did}/start` | Start camera streaming |
+| POST | `/camera/{did}/stop` | Stop camera streaming |
+| GET | `/camera/{did}/status` | Get camera status |
+
+#### Snapshots
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/snapshot/{did}` | Get camera snapshot (JPEG) |
+| GET | `/snapshot/{did}/{channel}` | Get snapshot for specific channel |
+
+### WebRTC Streaming
+
+WebRTC streams are available via MediaMTX's WHEP protocol:
+
+```
+POST http://localhost:8889/camera/{did}/{channel}/whep
+Content-Type: application/sdp
+
+{SDP Offer}
 ```
 
-### Available Commands
-
-| Type | Description | Parameters |
-|------|-------------|------------|
-| `init` | Initialize camera library | `cloud_server`, `access_token` |
-| `update_token` | Update access token | `access_token` |
-| `create_camera` | Create camera instance | `camera_info` |
-| `destroy_camera` | Destroy camera instance | `did` |
-| `start_camera` | Start streaming | `did`, `pin_code?`, `qualities?`, `enable_audio?` |
-| `stop_camera` | Stop streaming | `did` |
-| `get_status` | Get camera status | `did` |
-| `subscribe_frames` | Subscribe to JPEG frames | `did`, `channel?` |
-| `unsubscribe_frames` | Unsubscribe | `did`, `channel?` |
+Returns SDP Answer with status 201.
 
 ## Troubleshooting
 
@@ -88,15 +138,26 @@ All messages are JSON:
 ### Integration can't connect
 
 - Make sure the add-on is running (shows "Started")
-- Check that port 8765 is accessible
+- Check that ports 8765 and 8889 are accessible
 - Review the add-on logs for connection errors
 
 ### Video stream issues
 
-- Check add-on logs for decoding errors
+- Check add-on logs for streaming errors
 - Ensure your camera is online in Mi Home app
 - Try restarting the add-on
+- Check that WebRTC is supported in your browser
+
+### Too many connections error
+
+- The add-on properly releases connections when cameras stop
+- If you see this error, try restarting the add-on
+
+## Version History
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
 ## Support
 
-- [GitHub Issues](https://github.com/Ricky-Hao/ha-xiaomi-miot-camera/issues)
+For issues and feature requests, visit:
+https://github.com/Ricky-Hao/ha-xiaomi-miot-camera/issues

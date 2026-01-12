@@ -6,9 +6,9 @@ This custom component integrates Xiaomi MIoT cameras into Home Assistant, allowi
 
 ## Features
 
-- 🎥 Live video streaming from Xiaomi cameras
+- 🎥 **Instant WebRTC streaming** - Sub-second latency live video
 - 🔐 Secure OAuth2 authentication with Xiaomi account
-- 📷 Still image capture
+- 📷 Still image capture (snapshots)
 - 🌍 Support for multiple cloud regions (China, Europe, India, Russia, Singapore, US)
 - 🔄 Auto-reconnection on connection loss
 - 📺 Multi-channel camera support
@@ -145,31 +145,34 @@ Make sure the Camera Proxy Add-on is installed and running:
 ┌─────────────────────────────────────┐
 │  Home Assistant                     │
 │  └── Camera Entity                  │
-│      ├── stream_source: RTSP ───────┼──┐
-│      └── camera_image: JPEG ────────┼──┼──┐
-└─────────────────────────────────────┘  │  │
-                                         │  │ WebSocket
-                   RTSP (on-demand) ◄────┘  │ (snapshots)
-┌─────────────────────────────────────┐     │
-│  Camera Proxy Add-on (Debian)       │◄────┘
-│  ├── mediamtx (RTSP Server)         │
-│  │   └── On-demand streaming        │
-│  ├── libmiot_camera_lite.so         │
-│  ├── H.264 → RTSP (FFmpeg)          │
-│  ├── I-frame → JPEG (snapshots)     │
-│  └── WebSocket Server               │
+│      ├── WebRTC (WHEP) ─────────────┼──────────► Port 8889 (MediaMTX)
+│      └── Snapshots ─────────────────┼──┐
+└─────────────────────────────────────┘  │
+                                         │ Port 8765 (HTTP API)
+┌─────────────────────────────────────┐  │
+│  Camera Proxy Add-on (Debian)       │◄─┘
+│  ├── MediaMTX (WebRTC Server)       │
+│  │   └── Instant playback           │
+│  ├── FFmpeg (RTP encapsulation)     │
+│  ├── miot_kit (camera library)      │
+│  └── HTTP API Server                │
 └─────────────────────────────────────┘
 ```
 
-**Key Features:**
-- **On-demand streaming**: Camera only starts when someone views it, stops automatically
-- **Low bandwidth**: H.264 direct streaming (5-10x smaller than JPEG)
-- **Low CPU**: No transcoding, only remuxing
-- **Native HA integration**: Uses Home Assistant's built-in stream component
+**Data Flow:**
+```
+Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (external)
+```
 
-The integration provides two data paths:
-1. **Live streaming**: RTSP (H.264) for continuous viewing - handled by mediamtx
-2. **Snapshots**: JPEG over WebSocket for `camera.snapshot` service
+**Key Features:**
+- **Instant playback**: WebRTC provides <1s latency, no buffering
+- **Low bandwidth**: H.264/H.265 direct streaming
+- **Low CPU**: No transcoding in Home Assistant
+- **Native HA support**: Uses Home Assistant's WebRTC camera support
+
+**Ports:**
+- **8765**: HTTP API (OAuth, device discovery, camera control, snapshots)
+- **8889**: WebRTC streaming (WHEP protocol)
 
 ## Privacy Note
 

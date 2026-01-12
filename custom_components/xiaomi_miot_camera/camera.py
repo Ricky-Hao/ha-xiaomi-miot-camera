@@ -63,13 +63,10 @@ class XiaomiMiotCamera(Camera):
     """Xiaomi MIoT Camera entity."""
 
     _attr_has_entity_name = True
-    # Support STREAM feature for fallback HLS
+    # Support STREAM feature (required for WebRTC)
     _attr_supported_features = CameraEntityFeature.STREAM
-    # Prefer WebRTC for instant playback (no HA transcoding)
+    # Use WebRTC for instant playback (no HA transcoding)
     _attr_frontend_stream_type = StreamType.WEB_RTC
-
-    # Native WebRTC support flag
-    _attr_supported_features = CameraEntityFeature.STREAM
 
     def __init__(
         self,

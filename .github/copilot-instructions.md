@@ -9,29 +9,91 @@ Xiaomi MIoT Camera Integration is a Home Assistant integration for viewing Xiaom
 1. **Home Assistant Integration** (`custom_components/xiaomi_miot_camera/`): The HACS-installable integration that provides camera entities in Home Assistant
 2. **Camera Proxy Add-on** (`xiaomi_camera_proxy/`): A Home Assistant Add-on that runs the native camera library (required for HAOS users)
 
-The integration uses a **proxy-only architecture** - all camera streaming goes through the Camera Proxy Add-on which wraps the native C library (`libmiot_camera_lite.so`).
+The integration uses a **proxy-only architecture** with **WebRTC streaming**:
+- All camera streaming goes through the Camera Proxy Add-on
+- Add-on uses miot_kit to communicate with Xiaomi cloud
+- WebRTC via MediaMTX provides instant, low-latency playback
 
 ## Project Structure
 
 ```
 ha-xiaomi-miot-camera/
 ├── custom_components/xiaomi_miot_camera/   # HA Integration (HACS)
-│   ├── miot/                               # Core MIoT library (OAuth, cloud API)
-│   ├── camera.py                           # HA Camera entity
-│   ├── camera_backend.py                   # Proxy client (WebSocket)
+│   ├── miot/                               # MIoT types and proxy client
+│   │   ├── proxy_client.py                 # HTTP client for Add-on API
+│   │   ├── camera_backend.py               # Backend interface
+│   │   └── types.py                        # Pydantic models
+│   ├── camera.py                           # HA Camera entity (WebRTC)
 │   ├── coordinator.py                      # Data coordinator
 │   ├── config_flow.py                      # Configuration UI
 │   └── manifest.json                       # Integration manifest
 ├── xiaomi_camera_proxy/                    # HA Add-on
 │   ├── src/camera_proxy/                   # Python source
-│   │   ├── camera_manager.py               # Native library wrapper (ctypes)
-│   │   ├── server.py                       # WebSocket API server
+│   │   ├── camera_service.py               # Camera management service
+│   │   ├── server.py                       # HTTP API server
+│   │   ├── rtsp_streamer.py                # FFmpeg→RTSP streamer
 │   │   └── __main__.py                     # Entry point
-│   ├── libs/                               # Native libraries
-│   │   └── linux/{x86_64,arm64}/           # Platform-specific .so files
+│   ├── rootfs/app/mediamtx.yml             # MediaMTX config
 │   ├── config.yaml                         # Add-on configuration
 │   └── Dockerfile                          # Add-on container build
 └── repository.json                         # Add-on repository manifest
+```
+
+## Architecture
+
+### Data Flow
+```
+Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (external)
+```
+
+### Ports
+- **8765**: HTTP API (OAuth, devices, camera control, snapshots)
+- **8889**: WebRTC streaming (WHEP protocol)
+- **8554**: RTSP (internal only, FFmpeg → MediaMTX)
+- **9997**: MediaMTX API (internal)
+
+### Communication Flow
+```
+HA Integration  ←→  HTTP API (8765)  ←→  Camera Proxy Add-on  ←→  miot_kit  ←→  Xiaomi Cloud
+                                                                                     ↓
+HA Frontend     ←→  WebRTC (8889)   ←→  MediaMTX            ←→  FFmpeg    ←→  Camera Stream
+```
+
+### HTTP API Endpoints
+
+```python
+# Health & Info
+GET  /health
+GET  /info
+
+# OAuth
+GET  /oauth/servers
+POST /oauth/auth_url
+POST /oauth/callback
+POST /oauth/set_tokens
+POST /oauth/refresh
+
+# Devices
+GET  /devices
+GET  /cameras
+
+# Camera Control
+POST /camera/{did}/start
+POST /camera/{did}/stop
+GET  /camera/{did}/status
+
+# Snapshots
+GET  /snapshot/{did}
+GET  /snapshot/{did}/{channel}
+```
+
+### WebRTC (WHEP)
+```python
+# MediaMTX WHEP endpoint
+POST http://localhost:8889/camera/{did}/{channel}/whep
+Content-Type: application/sdp
+Body: SDP Offer
+Response: SDP Answer (201 Created)
 ```
 
 ## Development Commands
@@ -52,7 +114,7 @@ cd xiaomi_camera_proxy
 docker build -t xiaomi_camera_proxy .
 
 # Test Add-on locally
-docker run -p 8765:8765 xiaomi_camera_proxy
+docker run -p 8765:8765 -p 8889:8889 xiaomi_camera_proxy
 ```
 
 ### Debugging
@@ -66,84 +128,6 @@ logger:
 
 Check Add-on logs in Home Assistant → Settings → Add-ons → Xiaomi MIoT Camera Proxy → Log
 
-## Architecture
-
-### Communication Flow
-```
-HA Integration  ←→  WebSocket (8765)  ←→  Camera Proxy Add-on  ←→  Native Library  ←→  Xiaomi Cloud
-                                                                                    ↓
-                                                                               Camera Device
-```
-
-### WebSocket API Protocol
-The integration communicates with the Add-on via WebSocket JSON messages:
-
-```python
-# Initialize library
-{"action": "init", "cloud_server": "cn", "access_token": "..."}
-
-# Create camera
-{"action": "create_camera", "camera_info": {...}, "frame_interval": 1000}
-
-# Start streaming
-{"action": "start", "did": "device_id", "channel": 0}
-
-# Frame callback (from Add-on)
-{"action": "frame", "did": "device_id", "channel": 0, "data": "<base64>", ...}
-```
-
-### Key Constants
-
-**API Host** (camera_manager.py):
-```python
-PROJECT_CODE = "mico"
-OAUTH2_API_HOST_DEFAULT = f"{PROJECT_CODE}.api.mijia.tech"  # mico.api.mijia.tech
-```
-
-For non-China regions: `{region}.{OAUTH2_API_HOST_DEFAULT}` (e.g., `ru.mico.api.mijia.tech`)
-
-**Library Path** (in Docker container):
-```python
-lib_base = Path("/app/libs")  # NOT relative path!
-```
-
-## Version Management
-
-**⚠️ CRITICAL RULE**: Any code changes to Add-on or Integration MUST include a version bump. This includes:
-- Bug fixes
-- New features
-- Refactoring
-- Configuration changes
-
-Version numbers must be updated in **documentation**, **code**, and **configuration files** simultaneously.
-
-### Add-on Version (xiaomi_camera_proxy/)
-
-When modifying any file in `xiaomi_camera_proxy/`, update ALL of these:
-
-| File | Field | Example |
-|------|-------|---------|
-| `config.yaml` | `version: "x.x.x"` | `version: "0.2.2"` |
-| `src/camera_proxy/__init__.py` | `__version__ = "x.x.x"` | `__version__ = "0.2.2"` |
-| `src/camera_proxy/__main__.py` | Log message version string | `"Starting... v0.2.2"` |
-| `CHANGELOG.md` | Add new version section | `## [0.2.2] - YYYY-MM-DD` |
-
-### Integration Version (custom_components/xiaomi_miot_camera/)
-
-When modifying any file in `custom_components/xiaomi_miot_camera/`, update:
-
-| File | Field |
-|------|-------|
-| `manifest.json` | `"version": "x.x.x"` |
-
-### Update Checklist
-```bash
-# After making changes, update all version files, then:
-git add -A
-git commit -m "chore: Bump version to x.x.x"
-git push
-```
-
 ## Common Issues & Solutions
 
 ### HTTP 401 Authentication Error
@@ -154,10 +138,20 @@ git push
 2. Expired access token - re-authenticate via integration config flow
 3. Region mismatch - ensure `cloud_server` matches user's region
 
-### Library Not Found
-**Symptom**: `FileNotFoundError: Library not found: /libs/linux/x86_64/...`
+### Too Many Connections
+**Symptom**: Camera reports too many connections
 
-**Solution**: In Docker container, library path should be `/app/libs/`, not relative path.
+**Cause**: `stop_camera_async()` was not calling `destroy_camera_async()`
+
+**Solution**: Fixed in v0.4.18 - now properly releases connections when cameras stop
+
+### WebRTC Not Working
+**Symptom**: Camera shows black screen or "Stream unavailable"
+
+**Causes**:
+1. MediaMTX not running - check add-on logs
+2. Port 8889 not accessible
+3. Browser doesn't support WebRTC
 
 ### Add-on Version Not Updating
 **Symptom**: Add-on shows old version after update
@@ -170,20 +164,17 @@ git push
 ## Development Workflow
 
 ### Adding New Features
-1. Design the WebSocket API message format
-2. Implement in Add-on (`camera_manager.py` for native calls, `server.py` for API)
-3. Implement client in integration (`camera_backend.py`)
+1. Design the HTTP API endpoints
+2. Implement in Add-on (`camera_service.py` for logic, `server.py` for API)
+3. Implement client in integration (`proxy_client.py`)
 4. Update coordinator/camera entity as needed
 5. Test locally before committing
 
 ### Debugging Add-on Issues
 1. Check Add-on logs first
 2. Add debug logging: `_LOGGER.debug("Variable: %s", var)`
-3. Verify constants match between integration and Add-on:
-   - `OAUTH2_API_HOST_DEFAULT`
-   - `OAUTH2_CLIENT_ID`
-   - `cloud_server` format
-4. Check library path is absolute in container (`/app/libs/`)
+3. Test HTTP API directly: `curl http://localhost:8765/health`
+4. Test WebRTC: `curl -X POST http://localhost:8889/camera/{did}/0/whep`
 
 ### Release Checklist
 1. Update all version numbers (see Version Management)
