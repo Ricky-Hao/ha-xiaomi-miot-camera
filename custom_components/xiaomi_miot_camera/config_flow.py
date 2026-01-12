@@ -27,7 +27,7 @@ from .const import (
     CONF_CLOUD_SERVER,
     CONF_OAUTH_INFO,
     CONF_SELECTED_CAMERAS,
-    CLOUD_SERVERS,
+    CLOUD_SERVER,
 )
 from .miot.proxy_client import CameraProxyHttpClient
 
@@ -67,7 +67,7 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step - check Add-on and select cloud server."""
+        """Handle the initial step - check Add-on and proceed to auth."""
         errors: dict[str, str] = {}
 
         # Check if Add-on is available
@@ -81,7 +81,8 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         if user_input is not None:
-            self._cloud_server = user_input[CONF_CLOUD_SERVER]
+            # Only cn region is supported
+            self._cloud_server = CLOUD_SERVER
 
             # Initialize proxy client
             self._proxy_client = CameraProxyHttpClient(proxy_url=DEFAULT_PROXY_URL)
@@ -104,13 +105,8 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({
-                vol.Required(CONF_CLOUD_SERVER, default="cn"): vol.In(CLOUD_SERVERS),
-            }),
+            data_schema=vol.Schema({}),
             errors=errors,
-            description_placeholders={
-                "cloud_servers": ", ".join(CLOUD_SERVERS.values()),
-            },
         )
 
     async def async_step_auth(

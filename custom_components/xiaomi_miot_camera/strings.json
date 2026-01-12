@@ -3,10 +3,8 @@
         "step": {
             "user": {
                 "title": "Xiaomi MIoT Camera Setup",
-                "description": "Select your Xiaomi cloud server region to begin setup.\n\nNote: This integration requires the 'Xiaomi Camera Proxy' Add-on to be installed and running.",
-                "data": {
-                    "cloud_server": "Cloud Server Region"
-                }
+                "description": "Click submit to start setting up your Xiaomi cameras.\n\nNote: This integration requires the 'Xiaomi Camera Proxy' Add-on to be installed and running.",
+                "data": {}
             },
             "auth": {
                 "title": "Xiaomi Account Login",

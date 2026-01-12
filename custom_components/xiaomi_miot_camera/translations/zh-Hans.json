@@ -3,17 +3,15 @@
         "step": {
             "user": {
                 "title": "小米 MIoT 摄像头设置",
-                "description": "选择你的小米云服务器区域以开始设置。",
-                "data": {
-                    "cloud_server": "云服务器区域"
-                }
+                "description": "点击提交开始设置小米摄像头。\n\n注意：此集成需要安装并运行"Xiaomi Camera Proxy"插件。",
+                "data": {}
             },
             "auth": {
                 "title": "小米账号登录",
-                "description": "请登录你的小米账号：\n\n第一步：在浏览器中打开此链接：\n{auth_url}\n\n第二步：使用小米账号登录并授权。\n\n第三步：授权成功后，你会看到一个成功页面。在输入框中设置你的 Home Assistant 回调地址：\n{callback_url}\n\n第四步：点击跳转按钮自动完成授权。\n\n备选方案：如果自动回调不起作用，你可以手动从重定向页面复制 code 和 state 的值，并在下方输入。",
+                "description": "请登录你的小米账号：\n\n**第一步：** 点击下方链接打开小米登录页面：\n[打开登录页面]({auth_url})\n\n**第二步：** 使用小米账号登录并授权。\n\n**第三步：** 授权成功后，页面会显示授权码。从 URL 或页面中复制 **code** 和 **state** 的值。\n\n**第四步：** 将 code 和 state 粘贴到下方，然后点击提交。",
                 "data": {
-                    "code": "授权码（自动回调成功时可选）",
-                    "state": "状态码（自动回调成功时可选）"
+                    "code": "授权码",
+                    "state": "状态码"
                 }
             },
             "cameras": {

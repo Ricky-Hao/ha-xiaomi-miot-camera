@@ -18,12 +18,5 @@ DEFAULT_FRAME_INTERVAL: Final = 500  # ms
 # Default Add-on URL
 DEFAULT_PROXY_URL: Final = "http://127.0.0.1:8765"
 
-# Cloud server options
-CLOUD_SERVERS: Final = {
-    "cn": "中国大陆",
-    "de": "Europe",
-    "i2": "India",
-    "ru": "Russia",
-    "sg": "Singapore",
-    "us": "United States"
-}
+# Cloud server (only cn is supported)
+CLOUD_SERVER: Final = "cn"
