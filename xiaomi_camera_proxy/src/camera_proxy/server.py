@@ -8,7 +8,7 @@ This is a simplified server that uses CameraService for all camera operations.
 It provides:
 - HTTP endpoints for OAuth, device discovery, snapshots
 - WebSocket for real-time frame streaming (legacy support)
-- RTSP URLs via MediaMTX for live streaming
+- WebRTC streaming via MediaMTX (port 8889)
 """
 import asyncio
 import base64
@@ -94,7 +94,6 @@ class CameraProxyServer:
         app.router.add_post("/camera/{did}/start", self._handle_start_camera)
         app.router.add_post("/camera/{did}/stop", self._handle_stop_camera)
         app.router.add_get("/camera/{did}/status", self._handle_get_status)
-        app.router.add_get("/camera/{did}/rtsp_url", self._handle_get_rtsp_url)
         
         # Snapshots
         app.router.add_get("/snapshot/{did}", self._handle_get_snapshot)
@@ -253,7 +252,6 @@ class CameraProxyServer:
             
             return web.json_response({
                 "status": "ok",
-                "rtsp_url": self._camera_service.get_rtsp_url(did),
             })
         except Exception as e:
             _LOGGER.exception("Error starting camera %s", did)
@@ -279,15 +277,7 @@ class CameraProxyServer:
             _LOGGER.exception("Error getting camera status %s", did)
             return web.json_response({"error": str(e)}, status=500)
 
-    async def _handle_get_rtsp_url(self, request: web.Request) -> web.Response:
-        """Get RTSP URL for camera."""
-        did = request.match_info["did"]
-        channel = int(request.query.get("channel", 0))
-        return web.json_response({
-            "rtsp_url": self._camera_service.get_rtsp_url(did, channel)
-        })
-
-    # ==================== Snapshots ====================
+    # ==================== Snapshots ==============================
 
     async def _handle_get_snapshot(self, request: web.Request) -> web.Response:
         """Get camera snapshot as JPEG."""
@@ -380,7 +370,7 @@ class CameraProxyServer:
             did=did,
             pin_code=msg.get("pin_code"),
         )
-        return {"status": "ok", "rtsp_url": self._camera_service.get_rtsp_url(did)}
+        return {"status": "ok"}
 
     async def _ws_handle_stop_camera(self, ws: web.WebSocketResponse, msg: dict) -> dict:
         """Handle stop_camera via WebSocket."""
@@ -393,14 +383,10 @@ class CameraProxyServer:
         return {"status": "ok", "camera_status": status.value}
 
     async def _ws_handle_subscribe_frames(self, ws: web.WebSocketResponse, msg: dict) -> dict:
-        """Handle subscribe_frames via WebSocket (legacy)."""
-        # For legacy compatibility, just return the RTSP URL
-        did = msg.get("did")
-        channel = msg.get("channel", 0)
+        """Handle subscribe_frames via WebSocket (legacy, deprecated)."""
         return {
             "status": "ok",
-            "rtsp_url": self._camera_service.get_rtsp_url(did, channel),
-            "message": "Use RTSP URL for streaming. WebSocket frame streaming is deprecated.",
+            "message": "Use WebRTC for streaming. WebSocket frame streaming is deprecated.",
         }
 
 

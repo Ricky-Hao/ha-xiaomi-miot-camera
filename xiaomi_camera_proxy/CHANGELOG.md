@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.17] - 2026-01-12
+
+### Removed
+- **Remove external RTSP API**: `/camera/{did}/rtsp_url` endpoint removed
+- **Remove rtsp_url from responses**: Start camera now returns only status, no RTSP URL
+- **Integration cleanup**: Remove `stream_source()`, `get_rtsp_url_async()` - WebRTC only
+
+### Architecture
+- WebRTC is now the only external streaming protocol
+- Internal RTSP (FFmpeg → MediaMTX) remains for WebRTC source
+- Simpler codebase with single streaming path
+
 ## [0.4.16] - 2026-01-12
 
 ### Changed

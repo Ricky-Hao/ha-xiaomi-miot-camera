@@ -6,13 +6,13 @@ This version relies on the Camera Proxy Add-on for all camera operations.
 The Add-on handles:
 - OAuth authentication
 - Device discovery  
-- Camera streaming (RTSP)
+- Camera streaming (WebRTC)
 - Snapshot generation
 
 The Integration just needs to:
 - Pass OAuth tokens to Add-on
 - Get camera list from Add-on
-- Return RTSP URLs for streaming
+- Handle WebRTC signaling
 - Fetch snapshots via HTTP
 """
 from __future__ import annotations
@@ -42,7 +42,6 @@ class CameraData:
     camera_info: MIoTCameraInfo
     status: MIoTCameraStatus = MIoTCameraStatus.DISCONNECTED
     is_streaming: bool = False
-    rtsp_url: str = ""
 
 
 class XiaomiCameraCoordinator(DataUpdateCoordinator):
@@ -134,33 +133,20 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
             return
 
         try:
-            # Start camera via Add-on, get RTSP URL
-            rtsp_url = await self._backend.start_camera_async(
+            # Start camera via Add-on (ensures WebRTC stream is ready)
+            await self._backend.start_camera_async(
                 did=did,
                 quality=MIoTCameraVideoQuality.HIGH,
             )
             
-            self._cameras[did].rtsp_url = rtsp_url
             self._cameras[did].is_streaming = True
             self._cameras[did].status = MIoTCameraStatus.CONNECTED
             
-            _LOGGER.info("Started camera %s, RTSP: %s", did, rtsp_url)
+            _LOGGER.info("Started camera %s", did)
             
         except Exception as err:
             _LOGGER.error("Failed to start camera %s: %s", did, err)
             self._cameras[did].status = MIoTCameraStatus.ERROR
-
-    async def async_get_rtsp_url(self, did: str, channel: int = 0) -> str:
-        """Get RTSP URL for a camera."""
-        camera_data = self._cameras.get(did)
-        if camera_data and camera_data.rtsp_url:
-            return camera_data.rtsp_url
-        
-        # Fallback: ask Add-on
-        if self._backend:
-            return await self._backend.get_rtsp_url_async(did, channel)
-        
-        return ""
 
     async def async_get_frame(self, did: str, channel: int = 0) -> Optional[bytes]:
         """Get a snapshot frame for a camera."""
@@ -224,7 +210,6 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
                 "name": data.camera_info.name,
                 "status": data.status.value,
                 "is_streaming": data.is_streaming,
-                "rtsp_url": data.rtsp_url,
                 "channel_count": data.camera_info.channel_count or 1,
             }
             for did, data in self._cameras.items()

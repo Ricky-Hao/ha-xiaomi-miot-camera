@@ -117,12 +117,6 @@ class CameraBackend:
             return await self._client.get_camera_status_async(did)
         return MIoTCameraStatus.DISCONNECTED
 
-    async def get_rtsp_url_async(self, did: str, channel: int = 0) -> str:
-        """Get RTSP URL for camera."""
-        if self._client:
-            return await self._client.get_rtsp_url_async(did, channel)
-        return ""
-
     async def get_snapshot_async(self, did: str, channel: int = 0) -> Optional[bytes]:
         """Get camera snapshot as JPEG bytes."""
         if self._client:

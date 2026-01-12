@@ -12,7 +12,7 @@ The Add-on provides:
 - OAuth authentication
 - Device discovery
 - Camera control
-- RTSP streaming URLs
+- WebRTC streaming
 - Snapshot images
 """
 import asyncio
@@ -164,14 +164,14 @@ class CameraProxyHttpClient:
         pin_code: Optional[str] = None,
         quality: int = 2,  # HIGH = 2
         enable_audio: bool = False,
-    ) -> str:
-        """Start camera streaming. Returns RTSP URL."""
+    ) -> bool:
+        """Start camera streaming. Returns success status."""
         result = await self._post(f"/camera/{did}/start", {
             "pin_code": pin_code,
             "quality": quality,
             "enable_audio": enable_audio,
         })
-        return result.get("rtsp_url", "")
+        return result.get("status") == "ok"
 
     async def stop_camera_async(self, did: str) -> bool:
         """Stop camera streaming."""
@@ -183,12 +183,7 @@ class CameraProxyHttpClient:
         result = await self._get(f"/camera/{did}/status")
         return MIoTCameraStatus(result.get("status", 1))
 
-    async def get_rtsp_url_async(self, did: str, channel: int = 0) -> str:
-        """Get RTSP URL for camera."""
-        result = await self._get(f"/camera/{did}/rtsp_url?channel={channel}")
-        return result.get("rtsp_url", "")
-
-    # ==================== Snapshots ====================
+    # ==================== Snapshots ======================================
 
     async def get_snapshot_async(self, did: str, channel: int = 0) -> Optional[bytes]:
         """Get camera snapshot as JPEG bytes."""
