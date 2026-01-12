@@ -267,13 +267,14 @@ class RTSPStreamer:
             cmd = [
                 "ffmpeg",
                 "-hide_banner",
-                "-loglevel", "warning",
+                "-loglevel", "info",  # More verbose to debug issues
                 # Input settings
                 "-probesize", probesize,
                 "-analyzeduration", analyzeduration,
                 "-fflags", "+genpts+discardcorrupt+igndts",
                 "-flags", "low_delay",
                 "-err_detect", "ignore_err",  # Ignore decode errors
+                "-r", "15",  # Assume 15fps input (will be corrected by timestamps)
                 "-f", input_format,
                 "-i", "pipe:0",
             ]
@@ -289,10 +290,10 @@ class RTSPStreamer:
                     "-level", "3.1",
                     "-b:v", "2M",  # 2 Mbps bitrate
                     "-maxrate", "2.5M",
-                    "-bufsize", "2M",
+                    "-bufsize", "4M",  # Larger buffer for encoding
                     "-g", "30",  # Keyframe every 30 frames
                     "-keyint_min", "15",
-                    "-x264-params", "nal-hrd=cbr:force-cfr=1",
+                    "-r", "15",  # Output 15fps
                 ])
                 output_codec = "H.264 (transcoded)"
             else:
@@ -300,10 +301,11 @@ class RTSPStreamer:
                 cmd.extend(["-c:v", "copy"])
                 output_codec = "H.265" if codec_id == 5 else "H.264"
             
-            # Output settings
+            # Output settings - RTSP to MediaMTX
             cmd.extend([
                 "-f", "rtsp",
                 "-rtsp_transport", "tcp",
+                "-timeout", "30000000",  # 30 second timeout (in microseconds)
                 rtsp_url
             ])
             
@@ -351,13 +353,19 @@ class RTSPStreamer:
                 line = await loop.run_in_executor(None, process.stderr.readline)
                 if line:
                     line_str = line.decode().strip()
-                    if line_str and not line_str.startswith("frame="):
+                    if line_str:
+                        # Log all FFmpeg output for debugging
                         if "error" in line_str.lower():
                             _LOGGER.error("FFmpeg [%s]: %s", stream_key, line_str)
-                        elif not line_str.startswith("["):  # Skip codec info
+                        elif "warning" in line_str.lower():
+                            _LOGGER.warning("FFmpeg [%s]: %s", stream_key, line_str)
+                        elif line_str.startswith("frame=") or line_str.startswith("size="):
+                            # Progress info - log at debug
                             _LOGGER.debug("FFmpeg [%s]: %s", stream_key, line_str)
-        except Exception:
-            pass
+                        else:
+                            _LOGGER.info("FFmpeg [%s]: %s", stream_key, line_str)
+        except Exception as e:
+            _LOGGER.debug("FFmpeg monitor error [%s]: %s", stream_key, e)
         
         # FFmpeg exited
         exit_code = process.poll()

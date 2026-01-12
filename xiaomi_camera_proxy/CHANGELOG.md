@@ -409,3 +409,12 @@ Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (exte
 - Add FrameBuffer class to cache frames from last keyframe
 - FFmpeg now receives complete GOP (keyframe + following frames) on start/restart
 - This prevents "Error parsing NAL unit" errors when FFmpeg starts from P-frame
+
+## [0.6.3] - 2026-01-12
+
+### Fixed
+- Add explicit frame rate (-r 15) for FFmpeg input and output
+- Increase FFmpeg log level to info for better debugging
+- Add RTSP timeout parameter (30 seconds)
+- Increase encoder buffer size to 4MB
+- Improve FFmpeg error monitoring to show all output
