@@ -345,12 +345,24 @@ class CameraService:
         _LOGGER.info("Started camera: %s (stream ready)", did)
 
     async def stop_camera_async(self, did: str) -> None:
-        """Stop streaming a camera."""
+        """Stop streaming a camera and release connection."""
         if not self._camera_manager:
             return
 
         if did in self._active_cameras:
-            await self._camera_manager.stop_camera_async(did)
+            # Stop streaming first
+            try:
+                await self._camera_manager.stop_camera_async(did)
+            except Exception as e:
+                _LOGGER.warning("Error stopping camera %s: %s", did, e)
+            
+            # IMPORTANT: Destroy camera instance to release connection
+            # Without this, connections accumulate and cause "too many connections" error
+            try:
+                await self._camera_manager.destroy_camera_async(did)
+                _LOGGER.info("Destroyed camera instance: %s", did)
+            except Exception as e:
+                _LOGGER.warning("Error destroying camera %s: %s", did, e)
             
             # Stop RTSP streams
             camera_info = self._camera_list.get(did)
@@ -363,7 +375,7 @@ class CameraService:
             # Update saved active cameras
             await self._save_active_cameras_async()
             
-            _LOGGER.info("Stopped camera: %s", did)
+            _LOGGER.info("Stopped camera: %s (connection released)", did)
 
     async def get_camera_status_async(self, did: str) -> MIoTCameraStatus:
         """Get camera status."""

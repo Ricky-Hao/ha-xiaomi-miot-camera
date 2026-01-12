@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.18] - 2026-01-12
+
+### Fixed
+- **Fix connection leak**: Call `destroy_camera_async()` when stopping cameras to release native library connections
+- Previously only called `stop_camera_async()` which stops streaming but keeps the connection
+- This caused "too many connections" error when cameras were started/stopped multiple times
+
+### Changed
+- Each camera now has exactly one connection at a time
+- Connection is properly released when camera is stopped or Add-on is shut down
+
 ## [0.4.17] - 2026-01-12
 
 ### Removed
