@@ -558,6 +558,12 @@ class CameraService:
         """Handle raw video frame - push to RTSP."""
         if self._rtsp_streamer:
             await self._rtsp_streamer.push_frame(did, data, channel)
+            
+            # Log frame count periodically for debugging
+            key = f"{did}_{channel}"
+            frame_count = self._rtsp_streamer._frame_counts.get(key, 0)
+            if frame_count > 0 and frame_count % 100 == 0:
+                _LOGGER.debug("Camera %s channel %d: %d frames pushed", did, channel, frame_count)
 
     async def _on_decoded_jpg(
         self,
@@ -580,6 +586,12 @@ class CameraService:
         
         if did in self._camera_list:
             self._camera_list[did].camera_status = status
+        
+        # Log detailed info for debugging
+        if status == MIoTCameraStatus.DISCONNECTED:
+            _LOGGER.warning("Camera %s disconnected, miot_kit will attempt to reconnect", did)
+        elif status == MIoTCameraStatus.CONNECTED:
+            _LOGGER.info("Camera %s connected/reconnected, frames should start flowing", did)
         
         if self._on_status_changed:
             await self._on_status_changed(did, status)

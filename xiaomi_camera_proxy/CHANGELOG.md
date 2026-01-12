@@ -357,3 +357,11 @@ Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (exte
   - Reduced probesize from 5MB to 32KB for faster stream start
   - Added frame queue with automatic drop on overflow
   - Added automatic FFmpeg restart on crash
+
+## [0.5.3] - 2025-01-12
+
+### Changed
+- Increased MediaMTX read/write timeout from 10s to 60s for unstable connections
+- Enabled MediaMTX API on port 9997 for debugging
+- Added detailed status change logging for camera disconnect/reconnect
+- Added periodic frame count logging for debugging (every 100 frames)

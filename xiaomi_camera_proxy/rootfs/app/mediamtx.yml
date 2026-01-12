@@ -7,9 +7,10 @@
 logLevel: info
 logDestinations: [stdout]
 
-# Timeouts
-readTimeout: 10s
-writeTimeout: 10s
+# Timeouts - increased for unstable camera connections
+readTimeout: 60s
+writeTimeout: 60s
+writeQueueSize: 1024
 
 ###############################################
 # RTSP server - exposed to HA go2rtc
@@ -29,9 +30,10 @@ webrtc: no
 hls: no
 
 ###############################################
-# API - DISABLED (not needed)
+# API - enabled for debugging
 
-api: no
+api: yes
+apiAddress: :9997
 
 ###############################################
 # Path defaults
