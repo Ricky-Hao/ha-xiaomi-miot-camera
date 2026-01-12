@@ -135,17 +135,17 @@ class RTSPStreamer:
             
             # FFmpeg command: stdin (H.264/H.265 Annex B) -> RTSP (no transcoding)
             # Key settings:
-            # - probesize/analyzeduration: fast startup, don't wait for too many frames
+            # - probesize: need enough data to find VPS/SPS/PPS (parameter sets)
+            # - analyzeduration: time to analyze stream (microseconds)
             # - fflags +genpts: generate timestamps if missing
-            # - rtpflags latm: low-latency RTP flags
             cmd = [
                 "ffmpeg",
                 "-hide_banner",
-                "-loglevel", "info",  # Changed to info for debugging
-                # Input settings
-                "-probesize", "32",  # Minimum probe size for faster startup
-                "-analyzeduration", "0",  # Don't analyze, just start
-                "-fflags", "+genpts+discardcorrupt",  # Generate PTS, discard corrupt
+                "-loglevel", "info",
+                # Input settings - need enough data to find parameter sets
+                "-probesize", "5000000",  # 5MB - enough for IDR frame with params
+                "-analyzeduration", "5000000",  # 5 seconds in microseconds
+                "-fflags", "+genpts+discardcorrupt",
                 "-f", input_format,
                 "-i", "pipe:0",
                 # Output: copy codec, RTSP

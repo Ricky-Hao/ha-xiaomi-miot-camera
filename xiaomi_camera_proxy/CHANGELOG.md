@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.21] - 2026-01-12 (Add-on)
+
+### Fixed
+- **Fix HEVC parameter set detection**: Increased FFmpeg probesize to 5MB and analyzeduration to 5s
+- Previous probesize (32 bytes) was too small to find VPS/SPS/PPS parameter sets
+- This caused "PPS id out of range" and "dimensions not set" errors
+- FFmpeg now waits for enough data to properly detect video parameters
+
 ## [0.4.20] - 2026-01-12 (Add-on)
 
 ### Changed
