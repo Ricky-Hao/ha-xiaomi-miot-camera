@@ -401,3 +401,11 @@ Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (exte
 ### Changed
 - Simplified OAuth flow: now accepts a single Base64 string instead of separate code and state fields
 - Updated UI strings in English and Chinese
+
+## [0.6.2] - 2026-01-12
+
+### Fixed
+- Fix H.265→H.264 transcoding by waiting for keyframe before starting FFmpeg
+- Add FrameBuffer class to cache frames from last keyframe
+- FFmpeg now receives complete GOP (keyframe + following frames) on start/restart
+- This prevents "Error parsing NAL unit" errors when FFmpeg starts from P-frame
