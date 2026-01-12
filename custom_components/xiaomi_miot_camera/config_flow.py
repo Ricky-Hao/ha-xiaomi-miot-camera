@@ -1,13 +1,21 @@
 # Copyright (C) 2025 Xiaomi Corporation
 # This software may be used and distributed according to the terms of the Xiaomi Miloco License Agreement.
-"""Config flow for Xiaomi MIoT Camera integration."""
+"""Simplified config flow for Xiaomi MIoT Camera integration.
+
+This version uses the Camera Proxy Add-on for OAuth and device discovery.
+The flow is:
+1. User selects cloud server
+2. User authenticates via OAuth (handled by Add-on or manually)
+3. Cameras are discovered via Add-on
+4. User selects which cameras to use
+"""
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 from uuid import uuid4
 
+import aiohttp
 import voluptuous as vol
 
 from homeassistant import config_entries
@@ -20,83 +28,84 @@ from .const import (
     DOMAIN,
     CONF_CLOUD_SERVER,
     CONF_OAUTH_INFO,
-    CONF_UUID,
     CONF_SELECTED_CAMERAS,
     CLOUD_SERVERS,
-    OAUTH2_REDIRECT_URI,
     OAUTH_CALLBACK_PATH,
 )
-from .miot.client import MIoTClient
-from .miot.types import MIoTOauthInfo
-from .auth_callback import (
-    register_pending_flow,
-    unregister_pending_flow,
-    get_received_callback,
-    clear_received_callback,
-)
+from .miot.proxy_client import CameraProxyHttpClient
 
 _LOGGER = logging.getLogger(__name__)
+
+# Default Add-on URL
+DEFAULT_PROXY_URL = "http://127.0.0.1:8765"
+
+
+async def check_addon_available() -> bool:
+    """Check if Camera Proxy Add-on is available."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{DEFAULT_PROXY_URL}/health", timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("status") == "ok"
+    except Exception:
+        pass
+    return False
 
 
 class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Xiaomi MIoT Camera."""
 
-    VERSION = 1
+    VERSION = 2  # New version for simplified flow
 
     def __init__(self) -> None:
         """Initialize the config flow."""
-        self._uuid: str = ""
         self._cloud_server: str = "cn"
         self._oauth_info: dict | None = None
         self._cameras: dict = {}
-        self._client: MIoTClient | None = None
+        self._proxy_client: CameraProxyHttpClient | None = None
         self._auth_url: str = ""
-        self._oauth_state: str = ""
         self._ha_callback_url: str = ""
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step - select cloud server."""
+        """Handle the initial step - check Add-on and select cloud server."""
         errors: dict[str, str] = {}
+
+        # Check if Add-on is available
+        addon_available = await check_addon_available()
+        if not addon_available:
+            return self.async_abort(
+                reason="addon_not_available",
+                description_placeholders={
+                    "addon_url": "https://github.com/Ricky-Hao/ha-xiaomi-miot-camera"
+                }
+            )
 
         if user_input is not None:
             self._cloud_server = user_input[CONF_CLOUD_SERVER]
-            self._uuid = uuid4().hex
 
-            # Create client and generate auth URL
+            # Initialize proxy client
+            self._proxy_client = CameraProxyHttpClient(proxy_url=DEFAULT_PROXY_URL)
+
+            # Build HA callback URL
             try:
-                self._client = MIoTClient(
-                    uuid=self._uuid,
-                    redirect_uri=OAUTH2_REDIRECT_URI,
+                ha_url = get_url(self.hass, prefer_external=True)
+            except Exception:
+                ha_url = get_url(self.hass, prefer_external=False)
+            self._ha_callback_url = f"{ha_url}{OAUTH_CALLBACK_PATH}"
+
+            try:
+                # Get auth URL from Add-on
+                self._auth_url = await self._proxy_client.get_auth_url_async(
                     cloud_server=self._cloud_server,
-                    loop=self.hass.loop,
+                    redirect_uri=self._ha_callback_url,
                 )
-                await self._client.init_async()
-
-                # Generate OAuth URL and get the state
-                self._auth_url = await self._client.gen_oauth_url_async()
-                
-                # Extract state from the auth URL
-                from urllib.parse import urlparse, parse_qs
-                parsed = urlparse(self._auth_url)
-                params = parse_qs(parsed.query)
-                self._oauth_state = params.get("state", [""])[0]
-                
-                # Build the HA callback URL
-                try:
-                    ha_url = get_url(self.hass, prefer_external=True)
-                except Exception:
-                    ha_url = get_url(self.hass, prefer_external=False)
-                self._ha_callback_url = f"{ha_url}{OAUTH_CALLBACK_PATH}"
-                
-                _LOGGER.info("Generated OAuth URL: %s", self._auth_url)
-                _LOGGER.info("HA callback URL: %s", self._ha_callback_url)
-
+                _LOGGER.info("Generated OAuth URL via Add-on")
                 return await self.async_step_auth()
-
             except Exception as err:
-                _LOGGER.error("Failed to initialize: %s", err)
+                _LOGGER.error("Failed to get auth URL: %s", err)
                 errors["base"] = "cannot_connect"
 
         return self.async_show_form(
@@ -113,20 +122,8 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_auth(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the auth step - wait for OAuth callback or manual input."""
+        """Handle the auth step - user authenticates via OAuth."""
         errors: dict[str, str] = {}
-
-        # Register this flow for callback
-        if self._oauth_state:
-            register_pending_flow(self._oauth_state, self.flow_id)
-
-        # Check if we received a callback
-        if user_input is None and self._oauth_state:
-            callback_data = get_received_callback(self._oauth_state)
-            if callback_data:
-                user_input = callback_data
-                clear_received_callback(self._oauth_state)
-                _LOGGER.info("Using received callback data")
 
         if user_input is not None:
             code = user_input.get("code", "").strip()
@@ -134,21 +131,24 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             if code and state:
                 try:
-                    # Unregister pending flow
-                    if self._oauth_state:
-                        unregister_pending_flow(self._oauth_state)
+                    # Send callback to Add-on
+                    success = await self._proxy_client.handle_oauth_callback_async(code, state)
                     
-                    # Exchange code for token
-                    oauth_info = await self._client.get_access_token_async(code, state)
-                    self._oauth_info = oauth_info.model_dump()
-
-                    _LOGGER.info("OAuth authentication successful")
-
-                    # Get camera list
-                    return await self.async_step_cameras()
-
+                    if success:
+                        _LOGGER.info("OAuth authentication successful")
+                        
+                        # Store minimal oauth info (Add-on manages the actual tokens)
+                        self._oauth_info = {
+                            "access_token": "managed_by_addon",
+                            "refresh_token": "managed_by_addon",
+                            "expires_ts": 0,
+                        }
+                        
+                        return await self.async_step_cameras()
+                    else:
+                        errors["base"] = "invalid_auth"
                 except Exception as err:
-                    _LOGGER.error("OAuth authentication failed: %s", err)
+                    _LOGGER.error("OAuth callback failed: %s", err)
                     errors["base"] = "invalid_auth"
             else:
                 errors["base"] = "invalid_auth"
@@ -166,6 +166,49 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
+    async def async_step_auth_manual(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle manual token input (alternative to OAuth)."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            access_token = user_input.get("access_token", "").strip()
+            refresh_token = user_input.get("refresh_token", "").strip()
+
+            if access_token:
+                try:
+                    # Set tokens in Add-on
+                    success = await self._proxy_client.set_tokens_async(
+                        cloud_server=self._cloud_server,
+                        access_token=access_token,
+                        refresh_token=refresh_token,
+                    )
+                    
+                    if success:
+                        self._oauth_info = {
+                            "access_token": access_token,
+                            "refresh_token": refresh_token,
+                            "expires_ts": 0,
+                        }
+                        return await self.async_step_cameras()
+                    else:
+                        errors["base"] = "invalid_auth"
+                except Exception as err:
+                    _LOGGER.error("Failed to set tokens: %s", err)
+                    errors["base"] = "invalid_auth"
+            else:
+                errors["base"] = "invalid_auth"
+
+        return self.async_show_form(
+            step_id="auth_manual",
+            data_schema=vol.Schema({
+                vol.Required("access_token"): str,
+                vol.Optional("refresh_token"): str,
+            }),
+            errors=errors,
+        )
+
     async def async_step_cameras(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -174,12 +217,12 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if not self._cameras:
             try:
-                # Fetch cameras
-                cameras = await self._client.get_cameras_async()
+                # Fetch cameras from Add-on
+                cameras = await self._proxy_client.get_cameras_async()
                 self._cameras = {
                     did: info.name for did, info in cameras.items()
                 }
-                _LOGGER.info("Found %d cameras", len(self._cameras))
+                _LOGGER.info("Found %d cameras via Add-on", len(self._cameras))
             except Exception as err:
                 _LOGGER.error("Failed to get cameras: %s", err)
                 errors["base"] = "cannot_connect"
@@ -187,18 +230,14 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             selected = user_input.get(CONF_SELECTED_CAMERAS, [])
 
-            # Clean up client before finishing
-            if self._client:
-                try:
-                    await self._client.deinit_async()
-                except Exception:
-                    pass
+            # Clean up
+            if self._proxy_client:
+                await self._proxy_client.close_async()
 
             # Create config entry
             return self.async_create_entry(
                 title="Xiaomi MIoT Camera",
                 data={
-                    CONF_UUID: self._uuid,
                     CONF_CLOUD_SERVER: self._cloud_server,
                     CONF_OAUTH_INFO: self._oauth_info,
                     CONF_SELECTED_CAMERAS: selected if selected else list(self._cameras.keys()),

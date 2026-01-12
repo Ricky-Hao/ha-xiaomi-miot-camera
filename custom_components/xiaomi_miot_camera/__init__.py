@@ -47,6 +47,7 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> bool:
     """Set up Xiaomi MIoT Camera from a config entry."""
+    # Use simplified coordinator that delegates to Add-on
     from .coordinator import XiaomiCameraCoordinator
     
     _LOGGER.info("Setting up Xiaomi MIoT Camera integration")
@@ -54,21 +55,18 @@ async def async_setup_entry(
     # Extract configuration
     cloud_server = entry.data.get(CONF_CLOUD_SERVER, "cn")
     oauth_info = entry.data.get(CONF_OAUTH_INFO)
-    uuid = entry.data.get(CONF_UUID)
     selected_cameras = entry.data.get(CONF_SELECTED_CAMERAS, [])
 
-    if not oauth_info or not uuid:
-        _LOGGER.error("Missing OAuth info or UUID in config entry")
+    if not oauth_info:
+        _LOGGER.error("Missing OAuth info in config entry")
         return False
 
-    # Create coordinator
+    # Create simplified coordinator (uses Add-on for all operations)
     coordinator = XiaomiCameraCoordinator(
         hass=hass,
-        uuid=uuid,
         cloud_server=cloud_server,
         oauth_info=oauth_info,
         selected_cameras=selected_cameras,
-        frame_interval=DEFAULT_FRAME_INTERVAL,
     )
 
     # Initialize the coordinator

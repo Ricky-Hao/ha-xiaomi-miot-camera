@@ -20,6 +20,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, DEFAULT_FRAME_INTERVAL
+# Use the simplified coordinator that delegates to Add-on
 from .coordinator import XiaomiCameraCoordinator, CameraData
 
 _LOGGER = logging.getLogger(__name__)

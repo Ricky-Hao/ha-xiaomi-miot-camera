@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     curl \
     ffmpeg \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Install mediamtx (RTSP server)
@@ -31,7 +32,7 @@ RUN MEDIAMTX_VERSION="1.9.3" && \
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy and install Python dependencies
+# Copy and install Python dependencies (including miot_kit from git)
 WORKDIR /app
 COPY requirements.txt /tmp/
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
@@ -42,13 +43,13 @@ COPY rootfs/ /
 # Copy application source
 COPY src/ /app/
 
-# Copy native library
-COPY libs/linux/ /app/libs/linux/
+# Note: Native library is now included in miot_kit package
+# No need to copy libs/ separately
 
 # Set permissions
 RUN chmod +x /run.sh
 
-# Expose WebSocket port
-EXPOSE 8765
+# Expose ports
+EXPOSE 8765 8554
 
 CMD ["/run.sh"]

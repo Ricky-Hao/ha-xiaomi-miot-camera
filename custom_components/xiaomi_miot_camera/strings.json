@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "Xiaomi MIoT Camera Setup",
-                "description": "Select your Xiaomi cloud server region to begin setup.",
+                "description": "Select your Xiaomi cloud server region to begin setup.\n\nNote: This integration requires the 'Xiaomi Camera Proxy' Add-on to be installed and running.",
                 "data": {
                     "cloud_server": "Cloud Server Region"
                 }
@@ -16,6 +16,14 @@
                     "state": "State (optional if auto-callback works)"
                 }
             },
+            "auth_manual": {
+                "title": "Manual Token Input",
+                "description": "Enter your Xiaomi OAuth tokens manually.",
+                "data": {
+                    "access_token": "Access Token",
+                    "refresh_token": "Refresh Token (optional)"
+                }
+            },
             "cameras": {
                 "title": "Select Cameras",
                 "description": "Found {camera_count} camera(s). Select the cameras you want to add to Home Assistant.",
@@ -25,13 +33,14 @@
             }
         },
         "error": {
-            "cannot_connect": "Failed to connect to Xiaomi cloud service",
-            "invalid_auth": "Invalid authentication. Please check your code and state values, or try the authorization again.",
+            "cannot_connect": "Failed to connect to Camera Proxy Add-on or Xiaomi cloud service",
+            "invalid_auth": "Invalid authentication. Please check your credentials and try again.",
             "unknown": "An unexpected error occurred"
         },
         "abort": {
             "already_configured": "This account is already configured",
-            "no_cameras": "No cameras found in your Xiaomi account"
+            "no_cameras": "No cameras found in your Xiaomi account",
+            "addon_not_available": "Camera Proxy Add-on is not available. Please install it from: {addon_url}"
         }
     },
     "options": {

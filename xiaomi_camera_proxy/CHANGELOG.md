@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.4.0] - 2026-01-12
+
+### Major Refactoring
+- **Use miot_kit package**: Replaced all custom MIoT code with miot_kit from xiaomi-miloco
+- **Simplified architecture**: CameraService handles all camera operations using miot_kit
+- **New HTTP API**: RESTful endpoints for OAuth, device discovery, camera control
+- **pip install from git**: miot_kit installed via `pip install git+...#subdirectory=miot_kit`
+
+### Added
+- New `CameraService` class using miot_kit's `MIoTCamera`
+- HTTP endpoints: `/oauth/*`, `/devices`, `/cameras`, `/camera/{did}/*`, `/snapshot/*`
+- OAuth flow support directly in Add-on
+- Token persistence in `/data/tokens.json`
+
+### Changed
+- Server rewritten as `server_v2.py` using `CameraService`
+- Native library now comes bundled with miot_kit package
+- Removed redundant `camera_manager.py`, `decoder.py` code
+- WebSocket API kept for backward compatibility but deprecated
+
+### Technical
+- miot_kit provides: OAuth2, cloud API, camera library wrapper, video decoding
+- Add-on no longer needs to copy `libs/` directory manually
+- Reduced code duplication between Integration and Add-on
+
 ## [0.3.4] - 2026-01-12
 
 ### Fixed

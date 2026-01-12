@@ -1,0 +1,448 @@
+# -*- coding: utf-8 -*-
+# Copyright (C) 2025 Xiaomi Corporation
+# This software may be used and distributed according to the terms of the Xiaomi Miloco License Agreement.
+"""
+Camera Service - Main service that manages cameras using miot_kit.
+
+This service handles:
+- OAuth authentication flow
+- Device discovery from cloud
+- Camera streaming via RTSP
+- Snapshot generation
+"""
+import asyncio
+import json
+import logging
+from pathlib import Path
+from typing import Any, Callable, Coroutine, Dict, List, Optional
+
+from miot.camera import MIoTCamera, MIoTCameraInstance, get_camera_extra_info
+from miot.cloud import MIoTOAuth2Client, MIoTHttpClient
+from miot.types import (
+    MIoTCameraInfo,
+    MIoTCameraStatus,
+    MIoTCameraVideoQuality,
+    MIoTDeviceInfo,
+    MIoTOauthInfo,
+)
+from miot.const import CLOUD_SERVERS
+
+from .rtsp_streamer import RTSPStreamer
+
+_LOGGER = logging.getLogger(__name__)
+
+# Persistent storage path
+CONFIG_PATH = Path("/data")
+TOKENS_FILE = CONFIG_PATH / "tokens.json"
+
+
+class CameraService:
+    """Camera service that manages all cameras."""
+
+    def __init__(self):
+        """Initialize camera service."""
+        self._oauth_client: Optional[MIoTOAuth2Client] = None
+        self._http_client: Optional[MIoTHttpClient] = None
+        self._camera_manager: Optional[MIoTCamera] = None
+        self._rtsp_streamer: Optional[RTSPStreamer] = None
+
+        # State
+        self._cloud_server: str = "cn"
+        self._oauth_info: Optional[MIoTOauthInfo] = None
+        self._device_list: Dict[str, MIoTDeviceInfo] = {}
+        self._camera_list: Dict[str, MIoTCameraInfo] = {}
+        self._active_cameras: Dict[str, MIoTCameraInstance] = {}
+
+        # Snapshots cache: {did_channel: bytes}
+        self._snapshots: Dict[str, bytes] = {}
+
+        # Callbacks
+        self._on_status_changed: Optional[Callable] = None
+
+    @property
+    def initialized(self) -> bool:
+        """Check if service is initialized."""
+        return self._camera_manager is not None
+
+    @property
+    def authenticated(self) -> bool:
+        """Check if user is authenticated."""
+        return self._oauth_info is not None
+
+    @property
+    def cloud_server(self) -> str:
+        """Get current cloud server."""
+        return self._cloud_server
+
+    @property
+    def cameras(self) -> Dict[str, MIoTCameraInfo]:
+        """Get camera list."""
+        return self._camera_list
+
+    async def init_async(self, rtsp_streamer: Optional[RTSPStreamer] = None) -> None:
+        """Initialize the service."""
+        self._rtsp_streamer = rtsp_streamer or RTSPStreamer()
+        
+        # Load saved tokens
+        await self._load_tokens_async()
+        
+        _LOGGER.info("Camera service initialized")
+
+    async def deinit_async(self) -> None:
+        """Deinitialize the service."""
+        # Stop all cameras
+        for did in list(self._active_cameras.keys()):
+            await self.stop_camera_async(did)
+
+        # Cleanup
+        if self._camera_manager:
+            await self._camera_manager.deinit_async()
+            self._camera_manager = None
+
+        if self._http_client:
+            await self._http_client.deinit_async()
+            self._http_client = None
+
+        if self._oauth_client:
+            await self._oauth_client.deinit_async()
+            self._oauth_client = None
+
+        _LOGGER.info("Camera service deinitialized")
+
+    # ==================== OAuth ====================
+
+    def get_supported_servers(self) -> Dict[str, str]:
+        """Get supported cloud servers."""
+        return CLOUD_SERVERS
+
+    async def get_auth_url_async(
+        self,
+        cloud_server: str,
+        redirect_uri: str,
+    ) -> str:
+        """Get OAuth authorization URL."""
+        import uuid
+        
+        self._cloud_server = cloud_server
+        
+        # Create OAuth client
+        self._oauth_client = MIoTOAuth2Client(
+            redirect_uri=redirect_uri,
+            cloud_server=cloud_server,
+            uuid=str(uuid.uuid4()),
+        )
+        
+        return self._oauth_client.gen_auth_url(redirect_uri=redirect_uri)
+
+    async def handle_oauth_callback_async(
+        self,
+        code: str,
+        state: str,
+    ) -> bool:
+        """Handle OAuth callback and get tokens."""
+        if not self._oauth_client:
+            raise ValueError("OAuth client not initialized. Call get_auth_url_async first.")
+
+        # Verify state
+        if not await self._oauth_client.check_state_async(state):
+            raise ValueError("Invalid OAuth state")
+
+        # Exchange code for tokens
+        self._oauth_info = await self._oauth_client.get_access_token_async(code)
+        
+        # Save tokens
+        await self._save_tokens_async()
+        
+        # Initialize camera manager with new tokens
+        await self._init_camera_manager_async()
+        
+        _LOGGER.info("OAuth authentication successful")
+        return True
+
+    async def set_tokens_async(
+        self,
+        cloud_server: str,
+        access_token: str,
+        refresh_token: str,
+        expires_ts: int,
+    ) -> None:
+        """Set tokens directly (from HA integration)."""
+        self._cloud_server = cloud_server
+        self._oauth_info = MIoTOauthInfo(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_ts=expires_ts,
+        )
+        
+        await self._save_tokens_async()
+        await self._init_camera_manager_async()
+        
+        _LOGGER.info("Tokens set successfully for server: %s", cloud_server)
+
+    async def refresh_tokens_async(self) -> bool:
+        """Refresh access token."""
+        if not self._oauth_client or not self._oauth_info:
+            return False
+
+        try:
+            self._oauth_info = await self._oauth_client.refresh_access_token_async(
+                self._oauth_info.refresh_token
+            )
+            await self._save_tokens_async()
+            
+            # Update camera manager
+            if self._camera_manager:
+                await self._camera_manager.update_access_token_async(
+                    self._oauth_info.access_token
+                )
+            
+            _LOGGER.info("Tokens refreshed successfully")
+            return True
+        except Exception as e:
+            _LOGGER.error("Failed to refresh tokens: %s", e)
+            return False
+
+    # ==================== Device Discovery ====================
+
+    async def discover_devices_async(self) -> Dict[str, MIoTDeviceInfo]:
+        """Discover devices from cloud."""
+        if not self._http_client:
+            raise ValueError("Not authenticated")
+
+        # Get all devices
+        self._device_list = await self._http_client.get_devices_async()
+        
+        # Filter cameras
+        extra_info = await get_camera_extra_info()
+        self._camera_list = {}
+        
+        for did, device in self._device_list.items():
+            # Check if device is a camera
+            if self._is_camera_device(device, extra_info):
+                channel_count = self._get_channel_count(device.model, extra_info)
+                self._camera_list[did] = MIoTCameraInfo(
+                    **device.model_dump(),
+                    channel_count=channel_count,
+                    camera_status=MIoTCameraStatus.DISCONNECTED,
+                )
+        
+        _LOGGER.info("Discovered %d cameras", len(self._camera_list))
+        return self._device_list
+
+    async def get_cameras_async(self) -> Dict[str, MIoTCameraInfo]:
+        """Get discovered cameras."""
+        if not self._camera_list:
+            await self.discover_devices_async()
+        return self._camera_list
+
+    # ==================== Camera Control ====================
+
+    async def start_camera_async(
+        self,
+        did: str,
+        pin_code: Optional[str] = None,
+        quality: MIoTCameraVideoQuality = MIoTCameraVideoQuality.HIGH,
+        enable_audio: bool = False,
+    ) -> None:
+        """Start streaming a camera."""
+        if not self._camera_manager:
+            raise ValueError("Camera manager not initialized")
+
+        if did not in self._camera_list:
+            raise ValueError(f"Camera not found: {did}")
+
+        camera_info = self._camera_list[did]
+        
+        # Create camera instance if not exists
+        if did not in self._active_cameras:
+            instance = await self._camera_manager.create_camera_async(camera_info)
+            self._active_cameras[did] = instance
+            
+            # Register callbacks for each channel
+            for channel in range(camera_info.channel_count):
+                # Raw video -> RTSP
+                await self._camera_manager.register_raw_video_async(
+                    did=did,
+                    channel=channel,
+                    callback=self._on_raw_video_frame,
+                )
+                
+                # Decoded JPG -> Snapshot
+                await self._camera_manager.register_decode_jpg_async(
+                    did=did,
+                    channel=channel,
+                    callback=self._on_decoded_jpg,
+                )
+                
+                # Status changed
+                await self._camera_manager.register_status_changed_async(
+                    did=did,
+                    callback=self._on_camera_status_changed,
+                )
+        
+        # Start streaming
+        await self._camera_manager.start_camera_async(
+            did=did,
+            pin_code=pin_code,
+            qualities=quality,
+            enable_audio=enable_audio,
+            enable_reconnect=True,
+        )
+        
+        _LOGGER.info("Started camera: %s", did)
+
+    async def stop_camera_async(self, did: str) -> None:
+        """Stop streaming a camera."""
+        if not self._camera_manager:
+            return
+
+        if did in self._active_cameras:
+            await self._camera_manager.stop_camera_async(did)
+            
+            # Stop RTSP streams
+            camera_info = self._camera_list.get(did)
+            if camera_info and self._rtsp_streamer:
+                for channel in range(camera_info.channel_count):
+                    await self._rtsp_streamer.stop_stream(did, channel)
+            
+            del self._active_cameras[did]
+            _LOGGER.info("Stopped camera: %s", did)
+
+    async def get_camera_status_async(self, did: str) -> MIoTCameraStatus:
+        """Get camera status."""
+        if not self._camera_manager or did not in self._active_cameras:
+            return MIoTCameraStatus.DISCONNECTED
+        return await self._camera_manager.get_camera_status_async(did)
+
+    async def get_snapshot_async(self, did: str, channel: int = 0) -> Optional[bytes]:
+        """Get latest snapshot for a camera."""
+        key = f"{did}_{channel}"
+        return self._snapshots.get(key)
+
+    def get_rtsp_url(self, did: str, channel: int = 0) -> str:
+        """Get RTSP URL for a camera."""
+        return f"rtsp://127.0.0.1:8554/camera/{did}/{channel}"
+
+    # ==================== Internal Methods ====================
+
+    async def _init_camera_manager_async(self) -> None:
+        """Initialize camera manager with current tokens."""
+        if not self._oauth_info:
+            return
+
+        # Create HTTP client
+        self._http_client = MIoTHttpClient(
+            cloud_server=self._cloud_server,
+            access_token=self._oauth_info.access_token,
+        )
+
+        # Create camera manager
+        self._camera_manager = MIoTCamera(
+            cloud_server=self._cloud_server,
+            access_token=self._oauth_info.access_token,
+            frame_interval=500,
+            enable_hw_accel=False,
+        )
+        
+        version = await self._camera_manager.get_camera_version_async()
+        _LOGGER.info("Camera library version: %s", version)
+
+    async def _load_tokens_async(self) -> None:
+        """Load tokens from persistent storage."""
+        if not TOKENS_FILE.exists():
+            return
+
+        try:
+            import aiofiles
+            async with aiofiles.open(TOKENS_FILE, "r") as f:
+                data = json.loads(await f.read())
+            
+            self._cloud_server = data.get("cloud_server", "cn")
+            if "oauth_info" in data:
+                self._oauth_info = MIoTOauthInfo(**data["oauth_info"])
+                await self._init_camera_manager_async()
+                _LOGGER.info("Loaded saved tokens")
+        except Exception as e:
+            _LOGGER.warning("Failed to load tokens: %s", e)
+
+    async def _save_tokens_async(self) -> None:
+        """Save tokens to persistent storage."""
+        if not self._oauth_info:
+            return
+
+        try:
+            import aiofiles
+            CONFIG_PATH.mkdir(parents=True, exist_ok=True)
+            
+            data = {
+                "cloud_server": self._cloud_server,
+                "oauth_info": self._oauth_info.model_dump(),
+            }
+            
+            async with aiofiles.open(TOKENS_FILE, "w") as f:
+                await f.write(json.dumps(data, indent=2))
+            
+            _LOGGER.info("Saved tokens")
+        except Exception as e:
+            _LOGGER.error("Failed to save tokens: %s", e)
+
+    def _is_camera_device(self, device: MIoTDeviceInfo, extra_info) -> bool:
+        """Check if device is a camera."""
+        # Check by model prefix
+        if device.model.startswith(("chuangmi.camera", "isa.camera", "xiaomi.camera", "mxiang.camera")):
+            # Check denylist
+            denylist = extra_info.denylist.get("camera", {})
+            if device.model in denylist:
+                _LOGGER.debug("Camera %s is in denylist", device.model)
+                return False
+            return True
+        
+        # Check allowlist for other device types (wifispeaker with camera)
+        for cls_name, models in extra_info.allowlist.items():
+            if device.model in models:
+                return True
+        
+        return False
+
+    def _get_channel_count(self, model: str, extra_info) -> int:
+        """Get channel count for a camera model."""
+        if model in extra_info.extra_info:
+            return extra_info.extra_info[model].get("channel_count", 1)
+        return 1
+
+    async def _on_raw_video_frame(
+        self,
+        did: str,
+        data: bytes,
+        timestamp: int,
+        sequence: int,
+        channel: int,
+    ) -> None:
+        """Handle raw video frame - push to RTSP."""
+        if self._rtsp_streamer:
+            await self._rtsp_streamer.push_frame(did, data, channel)
+
+    async def _on_decoded_jpg(
+        self,
+        did: str,
+        data: bytes,
+        timestamp: int,
+        channel: int,
+    ) -> None:
+        """Handle decoded JPG - cache as snapshot."""
+        key = f"{did}_{channel}"
+        self._snapshots[key] = data
+
+    async def _on_camera_status_changed(
+        self,
+        did: str,
+        status: MIoTCameraStatus,
+    ) -> None:
+        """Handle camera status change."""
+        _LOGGER.info("Camera %s status changed: %s", did, status)
+        
+        if did in self._camera_list:
+            self._camera_list[did].camera_status = status
+        
+        if self._on_status_changed:
+            await self._on_status_changed(did, status)

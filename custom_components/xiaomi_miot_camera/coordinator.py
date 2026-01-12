@@ -1,91 +1,63 @@
 # Copyright (C) 2025 Xiaomi Corporation
 # This software may be used and distributed according to the terms of the Xiaomi Miloco License Agreement.
-"""Data coordinator for Xiaomi MIoT Camera integration."""
+"""Simplified coordinator for Xiaomi MIoT Camera integration.
+
+This version relies on the Camera Proxy Add-on for all camera operations.
+The Add-on handles:
+- OAuth authentication
+- Device discovery  
+- Camera streaming (RTSP)
+- Snapshot generation
+
+The Integration just needs to:
+- Pass OAuth tokens to Add-on
+- Get camera list from Add-on
+- Return RTSP URLs for streaming
+- Fetch snapshots via HTTP
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
-import time
-from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .miot.client import MIoTClient
-from .miot.camera_backend import CameraBackend, create_camera_backend
-from .miot.types import MIoTOauthInfo, MIoTCameraInfo, MIoTCameraStatus
+from .miot.camera_backend import CameraBackend, check_proxy_available
+from .miot.types import MIoTOauthInfo, MIoTCameraInfo, MIoTCameraStatus, MIoTCameraVideoQuality
 
-from .const import (
-    DOMAIN,
-    DEFAULT_IMG_BUFFER_SIZE,
-    DEFAULT_IMG_BUFFER_TTL,
-    OAUTH2_REDIRECT_URI,
-    CONF_PROXY_URL,
-)
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-
-@dataclass
-class CameraFrameBuffer:
-    """Buffer for camera frames."""
-    max_size: int = DEFAULT_IMG_BUFFER_SIZE
-    ttl: int = DEFAULT_IMG_BUFFER_TTL
-    _buffer: deque = field(default_factory=lambda: deque(maxlen=DEFAULT_IMG_BUFFER_SIZE))
-    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-
-    def __post_init__(self):
-        self._buffer = deque(maxlen=self.max_size)
-
-    async def put(self, frame: bytes) -> None:
-        """Add a frame to the buffer."""
-        async with self._lock:
-            self._buffer.append((frame, time.time()))
-
-    async def get_latest(self) -> Optional[bytes]:
-        """Get the latest frame."""
-        async with self._lock:
-            self._filter_old()
-            if self._buffer:
-                return self._buffer[-1][0]
-            return None
-
-    async def get_recent(self, n: int) -> List[bytes]:
-        """Get the most recent n frames."""
-        async with self._lock:
-            self._filter_old()
-            actual_n = min(n, len(self._buffer))
-            return [frame for frame, _ in list(self._buffer)[-actual_n:]]
-
-    def _filter_old(self) -> None:
-        """Filter out old frames."""
-        current_time = time.time()
-        while self._buffer and current_time - self._buffer[0][1] > self.ttl:
-            self._buffer.popleft()
+# Default Add-on URL
+DEFAULT_PROXY_URL = "http://127.0.0.1:8765"
 
 
 @dataclass
 class CameraData:
     """Data for a single camera."""
     camera_info: MIoTCameraInfo
-    frame_buffers: Dict[int, CameraFrameBuffer] = field(default_factory=dict)
     status: MIoTCameraStatus = MIoTCameraStatus.DISCONNECTED
     is_streaming: bool = False
+    rtsp_url: str = ""
 
 
 class XiaomiCameraCoordinator(DataUpdateCoordinator):
-    """Coordinator for Xiaomi MIoT Camera."""
+    """Simplified coordinator for Xiaomi MIoT Camera.
+    
+    All camera logic is delegated to the Camera Proxy Add-on.
+    This coordinator just manages the connection and provides data to entities.
+    """
 
     def __init__(
         self,
         hass: HomeAssistant,
-        uuid: str,
         cloud_server: str,
         oauth_info: dict,
         selected_cameras: List[str],
-        frame_interval: int,
         proxy_url: Optional[str] = None,
     ) -> None:
         """Initialize the coordinator."""
@@ -94,15 +66,12 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
             _LOGGER,
             name=DOMAIN,
         )
-        self._uuid = uuid
         self._cloud_server = cloud_server
         self._oauth_info = MIoTOauthInfo.model_validate(oauth_info)
         self._selected_cameras = selected_cameras
-        self._frame_interval = frame_interval
-        self._proxy_url = proxy_url or "ws://127.0.0.1:8765/ws"
+        self._proxy_url = proxy_url or DEFAULT_PROXY_URL
 
-        self._client: Optional[MIoTClient] = None
-        self._camera_backend: Optional[CameraBackend] = None
+        self._backend: Optional[CameraBackend] = None
         self._cameras: Dict[str, CameraData] = {}
         self._initialized = False
 
@@ -112,48 +81,39 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
         return self._cameras
 
     @property
-    def client(self) -> Optional[MIoTClient]:
-        """Return MIoT client."""
-        return self._client
+    def proxy_url(self) -> str:
+        """Return proxy URL."""
+        return self._proxy_url
 
     async def async_initialize(self) -> None:
-        """Initialize the coordinator and connect to cameras."""
+        """Initialize the coordinator."""
         if self._initialized:
             return
 
         _LOGGER.info("Initializing Xiaomi MIoT Camera coordinator")
 
-        # Create MIoT client
-        self._client = MIoTClient(
-            uuid=self._uuid,
-            redirect_uri=OAUTH2_REDIRECT_URI,
-            oauth_info=self._oauth_info.model_dump(),
+        # Check if Add-on is available
+        if not await check_proxy_available(self._proxy_url):
+            raise RuntimeError(
+                "Camera Proxy Add-on not available. "
+                "Please install and start the 'Xiaomi Camera Proxy' add-on."
+            )
+
+        # Create backend
+        self._backend = CameraBackend(proxy_url=self._proxy_url)
+        
+        # Initialize backend with tokens
+        version = await self._backend.init_async(
             cloud_server=self._cloud_server,
-            loop=self.hass.loop,
+            access_token=self._oauth_info.access_token,
+            refresh_token=self._oauth_info.refresh_token,
+            expires_ts=self._oauth_info.expires_ts,
         )
+        _LOGGER.info("Camera Proxy Add-on version: %s", version)
 
-        # Initialize client
-        await self._client.init_async()
-
-        # Create camera backend (connects to proxy add-on)
-        try:
-            self._camera_backend = await create_camera_backend(
-                proxy_url=self._proxy_url,
-                loop=self.hass.loop
-            )
-            version = await self._camera_backend.init_async(
-                cloud_server=self._cloud_server,
-                access_token=self._oauth_info.access_token,
-                frame_interval=self._frame_interval
-            )
-            _LOGGER.info("Camera backend initialized, version: %s", version)
-        except Exception as err:
-            _LOGGER.error("Failed to initialize camera backend: %s", err)
-            raise
-
-        # Get camera list
-        cameras = await self._client.get_cameras_async()
-        _LOGGER.info("Found %d cameras", len(cameras))
+        # Get cameras from Add-on (it handles discovery)
+        cameras = await self._backend.get_cameras_async()
+        _LOGGER.info("Found %d cameras from Add-on", len(cameras))
 
         # Filter selected cameras
         for did, camera_info in cameras.items():
@@ -161,137 +121,110 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
                 self._cameras[did] = CameraData(camera_info=camera_info)
                 _LOGGER.info("Added camera: %s (%s)", camera_info.name, did)
 
-        # Start camera streams
-        for did, camera_data in self._cameras.items():
-            await self._start_camera_stream(did, camera_data)
+        # Start all cameras
+        for did in self._cameras:
+            await self._start_camera(did)
 
         self._initialized = True
         _LOGGER.info("Coordinator initialization complete")
 
-    async def _start_camera_stream(self, did: str, camera_data: CameraData) -> None:
-        """Start streaming for a camera."""
+    async def _start_camera(self, did: str) -> None:
+        """Start streaming a camera."""
+        if did not in self._cameras:
+            return
+
         try:
-            camera_info = camera_data.camera_info
-
-            # Create camera instance via backend
-            await self._camera_backend.create_camera_async(
-                camera_info=camera_info,
-                frame_interval=self._frame_interval,
-            )
-
-            # Start the camera with auto-reconnect
-            await self._camera_backend.start_camera_async(
+            # Start camera via Add-on, get RTSP URL
+            rtsp_url = await self._backend.start_camera_async(
                 did=did,
-                enable_reconnect=True
+                quality=MIoTCameraVideoQuality.HIGH,
             )
-
-            # Create frame buffers for each channel
-            channel_count = camera_info.channel_count or 1
-            for channel in range(channel_count):
-                camera_data.frame_buffers[channel] = CameraFrameBuffer()
-
-                # Register frame callback
-                async def on_frame(
-                    frame_did: str, data: bytes, ts: int, ch: int,
-                    target_did: str = did, target_channel: int = channel
-                ) -> None:
-                    if target_did in self._cameras:
-                        buffer = self._cameras[target_did].frame_buffers.get(target_channel)
-                        if buffer:
-                            await buffer.put(data)
-
-                await self._camera_backend.register_decode_jpg_async(
-                    did=did,
-                    callback=on_frame,
-                    channel=channel,
-                )
-
-            # Register status callback
-            async def on_status_changed(status_did: str, status: MIoTCameraStatus) -> None:
-                if status_did in self._cameras:
-                    self._cameras[status_did].status = status
-                    self._cameras[status_did].is_streaming = (
-                        status == MIoTCameraStatus.CONNECTED
-                    )
-                    _LOGGER.info("Camera %s status changed to %s", status_did, status)
-
-            await self._camera_backend.register_status_changed_async(
-                did=did,
-                callback=on_status_changed
-            )
-
-            camera_data.is_streaming = True
-            _LOGGER.info("Started streaming for camera %s", did)
-
+            
+            self._cameras[did].rtsp_url = rtsp_url
+            self._cameras[did].is_streaming = True
+            self._cameras[did].status = MIoTCameraStatus.CONNECTED
+            
+            _LOGGER.info("Started camera %s, RTSP: %s", did, rtsp_url)
+            
         except Exception as err:
-            _LOGGER.error("Failed to start camera stream for %s: %s", did, err)
-            camera_data.is_streaming = False
+            _LOGGER.error("Failed to start camera %s: %s", did, err)
+            self._cameras[did].status = MIoTCameraStatus.ERROR
+
+    async def async_get_rtsp_url(self, did: str, channel: int = 0) -> str:
+        """Get RTSP URL for a camera."""
+        camera_data = self._cameras.get(did)
+        if camera_data and camera_data.rtsp_url:
+            return camera_data.rtsp_url
+        
+        # Fallback: ask Add-on
+        if self._backend:
+            return await self._backend.get_rtsp_url_async(did, channel)
+        
+        return ""
 
     async def async_get_frame(self, did: str, channel: int = 0) -> Optional[bytes]:
-        """Get the latest frame for a camera."""
-        camera_data = self._cameras.get(did)
-        if not camera_data:
-            return None
+        """Get a snapshot frame for a camera."""
+        if self._backend:
+            return await self._backend.get_snapshot_async(did, channel)
+        return None
 
-        buffer = camera_data.frame_buffers.get(channel)
-        if not buffer:
-            return None
-
-        return await buffer.get_latest()
+    async def async_get_status(self, did: str) -> MIoTCameraStatus:
+        """Get camera status."""
+        if self._backend:
+            return await self._backend.get_camera_status_async(did)
+        return MIoTCameraStatus.DISCONNECTED
 
     async def async_shutdown(self) -> None:
         """Shutdown the coordinator."""
         _LOGGER.info("Shutting down Xiaomi MIoT Camera coordinator")
 
-        # Stop all camera instances via backend
-        for did in self._cameras.keys():
+        # Stop all cameras
+        for did in self._cameras:
             try:
-                await self._camera_backend.stop_camera_async(did)
-                await self._camera_backend.destroy_camera_async(did)
+                if self._backend:
+                    await self._backend.stop_camera_async(did)
             except Exception as err:
-                _LOGGER.error("Error stopping camera %s: %s", did, err)
+                _LOGGER.debug("Error stopping camera %s: %s", did, err)
 
-        # Deinit camera backend
-        if self._camera_backend:
-            try:
-                await self._camera_backend.deinit_async()
-            except Exception as err:
-                _LOGGER.error("Error deinitializing camera backend: %s", err)
-
-        # Deinit client
-        if self._client:
-            try:
-                await self._client.deinit_async()
-            except Exception as err:
-                _LOGGER.error("Error deinitializing client: %s", err)
+        # Close backend
+        if self._backend:
+            await self._backend.deinit_async()
 
         self._cameras.clear()
         self._initialized = False
 
     async def async_refresh_token(self) -> bool:
-        """Refresh OAuth token."""
-        if not self._client or not self._oauth_info.refresh_token:
-            return False
-
+        """Refresh OAuth token via Add-on."""
+        # The Add-on handles token refresh internally
+        # We can just tell it to refresh
         try:
-            new_oauth_info = await self._client.refresh_access_token_async(
-                self._oauth_info.refresh_token
-            )
-            self._oauth_info = new_oauth_info
-            _LOGGER.info("OAuth token refreshed successfully")
-            return True
+            from .miot.proxy_client import CameraProxyHttpClient
+            client = CameraProxyHttpClient(proxy_url=self._proxy_url)
+            result = await client.refresh_tokens_async()
+            await client.close_async()
+            return result
         except Exception as err:
-            _LOGGER.error("Failed to refresh OAuth token: %s", err)
+            _LOGGER.error("Failed to refresh token: %s", err)
             return False
 
     async def _async_update_data(self) -> Dict[str, Any]:
         """Update data (called by DataUpdateCoordinator)."""
-        # Return current camera states
+        # Update status for each camera
+        if self._backend:
+            for did, camera_data in self._cameras.items():
+                try:
+                    status = await self._backend.get_camera_status_async(did)
+                    camera_data.status = status
+                    camera_data.is_streaming = (status == MIoTCameraStatus.CONNECTED)
+                except Exception:
+                    pass
+
         return {
             did: {
                 "name": data.camera_info.name,
-                "status": data.status,
+                "status": data.status.value,
                 "is_streaming": data.is_streaming,
+                "rtsp_url": data.rtsp_url,
                 "channel_count": data.camera_info.channel_count or 1,
             }
             for did, data in self._cameras.items()

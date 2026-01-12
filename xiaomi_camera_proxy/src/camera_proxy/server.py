@@ -1,329 +1,409 @@
 # -*- coding: utf-8 -*-
-"""WebSocket server for camera proxy."""
+# Copyright (C) 2025 Xiaomi Corporation
+# This software may be used and distributed according to the terms of the Xiaomi Miloco License Agreement.
+"""
+HTTP/WebSocket Server for Camera Proxy Add-on.
+
+This is a simplified server that uses CameraService for all camera operations.
+It provides:
+- HTTP endpoints for OAuth, device discovery, snapshots
+- WebSocket for real-time frame streaming (legacy support)
+- RTSP URLs via MediaMTX for live streaming
+"""
 import asyncio
 import base64
 import json
 import logging
-from typing import Any, Callable, Coroutine, Dict, Optional, Set
+from typing import Dict, Optional, Set
 
 from aiohttp import web, WSMsgType
 
-from .camera_manager import CameraManager
+from .camera_service import CameraService
+from .rtsp_streamer import RTSPStreamer
 
 _LOGGER = logging.getLogger(__name__)
 
+__version__ = "0.4.0"
+
 
 class CameraProxyServer:
-    """Camera Proxy WebSocket Server."""
+    """Camera Proxy HTTP/WebSocket Server."""
 
     def __init__(self, host: str = "0.0.0.0", port: int = 8765):
         """Initialize server."""
         self._host = host
         self._port = port
         self._app: Optional[web.Application] = None
-        self._camera_manager: Optional[CameraManager] = None
-        # WebSocket connections: {ws: {did: set of channels}}
+        self._runner: Optional[web.AppRunner] = None
+        
+        # Core services
+        self._rtsp_streamer = RTSPStreamer()
+        self._camera_service = CameraService()
+        
+        # WebSocket connections for legacy frame streaming
         self._ws_connections: Dict[web.WebSocketResponse, Dict[str, Set[int]]] = {}
-        # Frame subscriptions: {did: {channel: set of ws}}
-        self._frame_subscriptions: Dict[str, Dict[int, Set[web.WebSocketResponse]]] = {}
 
-    async def run(self):
-        """Run the server."""
+    async def start_async(self):
+        """Start the server."""
+        # Initialize camera service
+        await self._camera_service.init_async(self._rtsp_streamer)
+        
+        # Setup web app
         self._app = web.Application()
-        self._app.router.add_get("/ws", self._handle_websocket)
-        self._app.router.add_get("/health", self._handle_health)
-
-        self._camera_manager = CameraManager()
-
-        runner = web.AppRunner(self._app)
-        await runner.setup()
-        site = web.TCPSite(runner, self._host, self._port)
-        _LOGGER.info("Starting server on %s:%d", self._host, self._port)
+        self._setup_routes()
+        
+        # Start server
+        self._runner = web.AppRunner(self._app)
+        await self._runner.setup()
+        site = web.TCPSite(self._runner, self._host, self._port)
         await site.start()
+        
+        _LOGGER.info("Server started on %s:%d (version %s)", self._host, self._port, __version__)
 
-        # Keep running
-        while True:
-            await asyncio.sleep(3600)
+    async def stop_async(self):
+        """Stop the server."""
+        await self._camera_service.deinit_async()
+        
+        if self._runner:
+            await self._runner.cleanup()
+        
+        _LOGGER.info("Server stopped")
+
+    def _setup_routes(self):
+        """Setup HTTP routes."""
+        app = self._app
+        
+        # Health & Info
+        app.router.add_get("/health", self._handle_health)
+        app.router.add_get("/info", self._handle_info)
+        
+        # OAuth endpoints
+        app.router.add_get("/oauth/servers", self._handle_get_servers)
+        app.router.add_post("/oauth/auth_url", self._handle_get_auth_url)
+        app.router.add_post("/oauth/callback", self._handle_oauth_callback)
+        app.router.add_post("/oauth/set_tokens", self._handle_set_tokens)
+        app.router.add_post("/oauth/refresh", self._handle_refresh_tokens)
+        
+        # Device discovery
+        app.router.add_get("/devices", self._handle_get_devices)
+        app.router.add_get("/cameras", self._handle_get_cameras)
+        
+        # Camera control
+        app.router.add_post("/camera/{did}/start", self._handle_start_camera)
+        app.router.add_post("/camera/{did}/stop", self._handle_stop_camera)
+        app.router.add_get("/camera/{did}/status", self._handle_get_status)
+        app.router.add_get("/camera/{did}/rtsp_url", self._handle_get_rtsp_url)
+        
+        # Snapshots
+        app.router.add_get("/snapshot/{did}", self._handle_get_snapshot)
+        app.router.add_get("/snapshot/{did}/{channel}", self._handle_get_snapshot)
+        
+        # Legacy WebSocket for frame streaming
+        app.router.add_get("/ws", self._handle_websocket)
+
+    # ==================== Health & Info ====================
 
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Health check endpoint."""
-        return web.json_response({"status": "ok"})
+        return web.json_response({
+            "status": "ok",
+            "version": __version__,
+            "authenticated": self._camera_service.authenticated,
+            "initialized": self._camera_service.initialized,
+        })
+
+    async def _handle_info(self, request: web.Request) -> web.Response:
+        """Get server info."""
+        return web.json_response({
+            "version": __version__,
+            "cloud_server": self._camera_service.cloud_server,
+            "authenticated": self._camera_service.authenticated,
+            "camera_count": len(self._camera_service.cameras),
+        })
+
+    # ==================== OAuth Endpoints ====================
+
+    async def _handle_get_servers(self, request: web.Request) -> web.Response:
+        """Get supported cloud servers."""
+        servers = self._camera_service.get_supported_servers()
+        return web.json_response({"servers": servers})
+
+    async def _handle_get_auth_url(self, request: web.Request) -> web.Response:
+        """Get OAuth authorization URL."""
+        try:
+            data = await request.json()
+            cloud_server = data.get("cloud_server", "cn")
+            redirect_uri = data.get("redirect_uri")
+            
+            if not redirect_uri:
+                return web.json_response({"error": "redirect_uri required"}, status=400)
+            
+            auth_url = await self._camera_service.get_auth_url_async(
+                cloud_server=cloud_server,
+                redirect_uri=redirect_uri,
+            )
+            
+            return web.json_response({"auth_url": auth_url})
+        except Exception as e:
+            _LOGGER.exception("Error getting auth URL")
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_oauth_callback(self, request: web.Request) -> web.Response:
+        """Handle OAuth callback."""
+        try:
+            data = await request.json()
+            code = data.get("code")
+            state = data.get("state")
+            
+            if not code or not state:
+                return web.json_response({"error": "code and state required"}, status=400)
+            
+            success = await self._camera_service.handle_oauth_callback_async(code, state)
+            
+            if success:
+                return web.json_response({"status": "ok"})
+            else:
+                return web.json_response({"error": "OAuth failed"}, status=401)
+        except Exception as e:
+            _LOGGER.exception("Error handling OAuth callback")
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_set_tokens(self, request: web.Request) -> web.Response:
+        """Set tokens directly (from HA integration)."""
+        try:
+            data = await request.json()
+            
+            await self._camera_service.set_tokens_async(
+                cloud_server=data.get("cloud_server", "cn"),
+                access_token=data["access_token"],
+                refresh_token=data["refresh_token"],
+                expires_ts=data.get("expires_ts", 0),
+            )
+            
+            return web.json_response({"status": "ok"})
+        except KeyError as e:
+            return web.json_response({"error": f"Missing field: {e}"}, status=400)
+        except Exception as e:
+            _LOGGER.exception("Error setting tokens")
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_refresh_tokens(self, request: web.Request) -> web.Response:
+        """Refresh access token."""
+        try:
+            success = await self._camera_service.refresh_tokens_async()
+            if success:
+                return web.json_response({"status": "ok"})
+            else:
+                return web.json_response({"error": "Refresh failed"}, status=401)
+        except Exception as e:
+            _LOGGER.exception("Error refreshing tokens")
+            return web.json_response({"error": str(e)}, status=500)
+
+    # ==================== Device Discovery ====================
+
+    async def _handle_get_devices(self, request: web.Request) -> web.Response:
+        """Get all devices."""
+        try:
+            devices = await self._camera_service.discover_devices_async()
+            return web.json_response({
+                "devices": {did: dev.model_dump() for did, dev in devices.items()}
+            })
+        except Exception as e:
+            _LOGGER.exception("Error getting devices")
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_get_cameras(self, request: web.Request) -> web.Response:
+        """Get discovered cameras."""
+        try:
+            cameras = await self._camera_service.get_cameras_async()
+            return web.json_response({
+                "cameras": {did: cam.model_dump() for did, cam in cameras.items()}
+            })
+        except Exception as e:
+            _LOGGER.exception("Error getting cameras")
+            return web.json_response({"error": str(e)}, status=500)
+
+    # ==================== Camera Control ====================
+
+    async def _handle_start_camera(self, request: web.Request) -> web.Response:
+        """Start camera streaming."""
+        did = request.match_info["did"]
+        try:
+            data = await request.json() if request.body_exists else {}
+            
+            await self._camera_service.start_camera_async(
+                did=did,
+                pin_code=data.get("pin_code"),
+                quality=data.get("quality", 2),  # HIGH = 2
+                enable_audio=data.get("enable_audio", False),
+            )
+            
+            return web.json_response({
+                "status": "ok",
+                "rtsp_url": self._camera_service.get_rtsp_url(did),
+            })
+        except Exception as e:
+            _LOGGER.exception("Error starting camera %s", did)
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_stop_camera(self, request: web.Request) -> web.Response:
+        """Stop camera streaming."""
+        did = request.match_info["did"]
+        try:
+            await self._camera_service.stop_camera_async(did)
+            return web.json_response({"status": "ok"})
+        except Exception as e:
+            _LOGGER.exception("Error stopping camera %s", did)
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_get_status(self, request: web.Request) -> web.Response:
+        """Get camera status."""
+        did = request.match_info["did"]
+        try:
+            status = await self._camera_service.get_camera_status_async(did)
+            return web.json_response({"status": status.value})
+        except Exception as e:
+            _LOGGER.exception("Error getting camera status %s", did)
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_get_rtsp_url(self, request: web.Request) -> web.Response:
+        """Get RTSP URL for camera."""
+        did = request.match_info["did"]
+        channel = int(request.query.get("channel", 0))
+        return web.json_response({
+            "rtsp_url": self._camera_service.get_rtsp_url(did, channel)
+        })
+
+    # ==================== Snapshots ====================
+
+    async def _handle_get_snapshot(self, request: web.Request) -> web.Response:
+        """Get camera snapshot as JPEG."""
+        did = request.match_info["did"]
+        channel = int(request.match_info.get("channel", 0))
+        
+        try:
+            snapshot = await self._camera_service.get_snapshot_async(did, channel)
+            
+            if snapshot:
+                return web.Response(
+                    body=snapshot,
+                    content_type="image/jpeg",
+                )
+            else:
+                return web.Response(status=404, text="No snapshot available")
+        except Exception as e:
+            _LOGGER.exception("Error getting snapshot for %s", did)
+            return web.json_response({"error": str(e)}, status=500)
+
+    # ==================== Legacy WebSocket ====================
 
     async def _handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
-        """Handle WebSocket connection."""
+        """Handle legacy WebSocket connection for frame streaming."""
         ws = web.WebSocketResponse()
         await ws.prepare(request)
-        _LOGGER.info("New WebSocket connection from %s", request.remote)
-
+        _LOGGER.info("WebSocket connection from %s", request.remote)
+        
         self._ws_connections[ws] = {}
-
+        
         try:
             async for msg in ws:
                 if msg.type == WSMsgType.TEXT:
-                    await self._handle_message(ws, msg.data)
+                    await self._handle_ws_message(ws, msg.data)
                 elif msg.type == WSMsgType.ERROR:
                     _LOGGER.error("WebSocket error: %s", ws.exception())
         finally:
-            await self._cleanup_connection(ws)
-
+            if ws in self._ws_connections:
+                del self._ws_connections[ws]
+        
         return ws
 
-    async def _handle_message(self, ws: web.WebSocketResponse, data: str):
-        """Handle incoming WebSocket message."""
+    async def _handle_ws_message(self, ws: web.WebSocketResponse, data: str):
+        """Handle WebSocket message (legacy API)."""
         try:
             message = json.loads(data)
             msg_type = message.get("type")
             msg_id = message.get("id")
-
-            _LOGGER.debug("Received message: %s", msg_type)
-
-            handler = getattr(self, f"_handle_{msg_type}", None)
+            
+            # Map old WebSocket commands to new HTTP-style handling
+            handlers = {
+                "init": self._ws_handle_init,
+                "create_camera": self._ws_handle_create_camera,
+                "start_camera": self._ws_handle_start_camera,
+                "stop_camera": self._ws_handle_stop_camera,
+                "get_status": self._ws_handle_get_status,
+                "subscribe_frames": self._ws_handle_subscribe_frames,
+            }
+            
+            handler = handlers.get(msg_type)
             if handler:
                 result = await handler(ws, message)
-                await self._send_response(ws, msg_id, result)
+                await ws.send_json({"id": msg_id, "success": True, **result})
             else:
-                await self._send_error(ws, msg_id, f"Unknown message type: {msg_type}")
-
-        except json.JSONDecodeError as e:
-            _LOGGER.error("Invalid JSON: %s", e)
-            await self._send_error(ws, None, "Invalid JSON")
+                await ws.send_json({"id": msg_id, "success": False, "error": f"Unknown type: {msg_type}"})
+                
         except Exception as e:
-            _LOGGER.exception("Error handling message: %s", e)
-            await self._send_error(ws, message.get("id"), str(e))
+            _LOGGER.exception("WebSocket error")
+            await ws.send_json({"id": message.get("id"), "success": False, "error": str(e)})
 
-    async def _handle_init(self, ws: web.WebSocketResponse, message: dict) -> dict:
-        """Handle init message - initialize camera library."""
-        cloud_server = message.get("cloud_server", "cn")
-        access_token = message.get("access_token")
-        
-        if not access_token:
-            raise ValueError("access_token is required")
-
-        _LOGGER.info("Initializing camera library for cloud server: %s", cloud_server)
-        _LOGGER.debug("Access token length: %d", len(access_token) if access_token else 0)
-
-        await self._camera_manager.init_async(
-            cloud_server=cloud_server,
-            access_token=access_token
+    async def _ws_handle_init(self, ws: web.WebSocketResponse, msg: dict) -> dict:
+        """Handle init via WebSocket."""
+        await self._camera_service.set_tokens_async(
+            cloud_server=msg.get("cloud_server", "cn"),
+            access_token=msg["access_token"],
+            refresh_token=msg.get("refresh_token", ""),
+            expires_ts=msg.get("expires_ts", 0),
         )
-        
-        version = await self._camera_manager.get_version_async()
-        return {"status": "ok", "version": version}
-
-    async def _handle_update_token(self, ws: web.WebSocketResponse, message: dict) -> dict:
-        """Handle update token message."""
-        access_token = message.get("access_token")
-        if not access_token:
-            raise ValueError("access_token is required")
-
-        await self._camera_manager.update_access_token_async(access_token)
         return {"status": "ok"}
 
-    async def _handle_create_camera(self, ws: web.WebSocketResponse, message: dict) -> dict:
-        """Handle create camera message."""
-        camera_info = message.get("camera_info")
-        if not camera_info:
-            raise ValueError("camera_info is required")
+    async def _ws_handle_create_camera(self, ws: web.WebSocketResponse, msg: dict) -> dict:
+        """Handle create_camera via WebSocket."""
+        # Cameras are auto-discovered, just return ok
+        return {"status": "ok", "did": msg.get("camera_info", {}).get("did")}
 
-        await self._camera_manager.create_camera_async(camera_info)
-        return {"status": "ok", "did": camera_info.get("did")}
-
-    async def _handle_destroy_camera(self, ws: web.WebSocketResponse, message: dict) -> dict:
-        """Handle destroy camera message."""
-        did = message.get("did")
-        if not did:
-            raise ValueError("did is required")
-
-        await self._camera_manager.destroy_camera_async(did)
-        return {"status": "ok"}
-
-    async def _handle_start_camera(self, ws: web.WebSocketResponse, message: dict) -> dict:
-        """Handle start camera message."""
-        did = message.get("did")
-        if not did:
-            raise ValueError("did is required")
-
-        await self._camera_manager.start_camera_async(
+    async def _ws_handle_start_camera(self, ws: web.WebSocketResponse, msg: dict) -> dict:
+        """Handle start_camera via WebSocket."""
+        did = msg.get("did")
+        await self._camera_service.start_camera_async(
             did=did,
-            pin_code=message.get("pin_code"),
-            qualities=message.get("qualities", [1]),  # LOW quality default
-            enable_audio=message.get("enable_audio", False),
-            enable_reconnect=message.get("enable_reconnect", False)
+            pin_code=msg.get("pin_code"),
         )
+        return {"status": "ok", "rtsp_url": self._camera_service.get_rtsp_url(did)}
+
+    async def _ws_handle_stop_camera(self, ws: web.WebSocketResponse, msg: dict) -> dict:
+        """Handle stop_camera via WebSocket."""
+        await self._camera_service.stop_camera_async(msg.get("did"))
         return {"status": "ok"}
 
-    async def _handle_stop_camera(self, ws: web.WebSocketResponse, message: dict) -> dict:
-        """Handle stop camera message."""
-        did = message.get("did")
-        if not did:
-            raise ValueError("did is required")
+    async def _ws_handle_get_status(self, ws: web.WebSocketResponse, msg: dict) -> dict:
+        """Handle get_status via WebSocket."""
+        status = await self._camera_service.get_camera_status_async(msg.get("did"))
+        return {"status": "ok", "camera_status": status.value}
 
-        await self._camera_manager.stop_camera_async(did)
-        return {"status": "ok"}
-
-    async def _handle_get_status(self, ws: web.WebSocketResponse, message: dict) -> dict:
-        """Handle get status message."""
-        did = message.get("did")
-        if not did:
-            raise ValueError("did is required")
-
-        status = await self._camera_manager.get_status_async(did)
-        return {"status": "ok", "camera_status": status}
-
-    async def _handle_subscribe_frames(self, ws: web.WebSocketResponse, message: dict) -> dict:
-        """Handle subscribe to frames message."""
-        did = message.get("did")
-        channel = message.get("channel", 0)
-        frame_type = message.get("frame_type", "jpg")  # jpg, raw_video, raw_audio, pcm
-
-        if not did:
-            raise ValueError("did is required")
-
-        # Track subscription
-        if did not in self._ws_connections[ws]:
-            self._ws_connections[ws][did] = set()
-        self._ws_connections[ws][did].add(channel)
-
-        if did not in self._frame_subscriptions:
-            self._frame_subscriptions[did] = {}
-        if channel not in self._frame_subscriptions[did]:
-            self._frame_subscriptions[did][channel] = set()
-        self._frame_subscriptions[did][channel].add(ws)
-
-        # Register callback based on frame type
-        if frame_type == "jpg":
-            await self._camera_manager.register_decode_jpg_async(
-                did=did,
-                channel=channel,
-                callback=lambda d, data, ts, ch: self._on_frame(d, data, ts, ch, "jpg")
-            )
-        elif frame_type == "raw_video":
-            await self._camera_manager.register_raw_video_async(
-                did=did,
-                channel=channel,
-                callback=lambda d, data, ts, seq, ch: self._on_raw_frame(d, data, ts, seq, ch, "raw_video")
-            )
-        elif frame_type == "raw_audio":
-            await self._camera_manager.register_raw_audio_async(
-                did=did,
-                channel=channel,
-                callback=lambda d, data, ts, seq, ch: self._on_raw_frame(d, data, ts, seq, ch, "raw_audio")
-            )
-        elif frame_type == "pcm":
-            await self._camera_manager.register_decode_pcm_async(
-                did=did,
-                channel=channel,
-                callback=lambda d, data, ts, ch: self._on_frame(d, data, ts, ch, "pcm")
-            )
-
-        return {"status": "ok"}
-
-    async def _handle_unsubscribe_frames(self, ws: web.WebSocketResponse, message: dict) -> dict:
-        """Handle unsubscribe from frames message."""
-        did = message.get("did")
-        channel = message.get("channel", 0)
-
-        if not did:
-            raise ValueError("did is required")
-
-        # Remove subscription tracking
-        if ws in self._ws_connections and did in self._ws_connections[ws]:
-            self._ws_connections[ws][did].discard(channel)
-
-        if did in self._frame_subscriptions and channel in self._frame_subscriptions[did]:
-            self._frame_subscriptions[did][channel].discard(ws)
-
-        return {"status": "ok"}
-
-    async def _on_frame(self, did: str, data: bytes, timestamp: int, channel: int, frame_type: str):
-        """Handle decoded frame callback."""
-        _LOGGER.debug(
-            "_on_frame called: did=%s, channel=%d, type=%s, data_len=%d",
-            did, channel, frame_type, len(data)
-        )
-        
-        if did not in self._frame_subscriptions:
-            _LOGGER.debug("No subscriptions for did=%s", did)
-            return
-        if channel not in self._frame_subscriptions[did]:
-            _LOGGER.debug("No subscriptions for did=%s channel=%d", did, channel)
-            return
-
-        # Validate JPEG data
-        if frame_type == "jpg" and len(data) > 2:
-            if data[:2] != b'\xff\xd8':
-                _LOGGER.warning(
-                    "Invalid JPEG header: %s (expected FFD8), len=%d",
-                    data[:2].hex(), len(data)
-                )
-            else:
-                _LOGGER.debug("Valid JPEG frame: %d bytes", len(data))
-
-        # Send to all subscribed WebSocket connections
-        subscribers = self._frame_subscriptions[did][channel]
-        _LOGGER.debug("Sending frame to %d subscribers", len(subscribers))
-        
-        frame_msg = {
-            "type": "frame",
-            "did": did,
-            "channel": channel,
-            "frame_type": frame_type,
-            "timestamp": timestamp,
-            "data": base64.b64encode(data).decode("ascii")
+    async def _ws_handle_subscribe_frames(self, ws: web.WebSocketResponse, msg: dict) -> dict:
+        """Handle subscribe_frames via WebSocket (legacy)."""
+        # For legacy compatibility, just return the RTSP URL
+        did = msg.get("did")
+        channel = msg.get("channel", 0)
+        return {
+            "status": "ok",
+            "rtsp_url": self._camera_service.get_rtsp_url(did, channel),
+            "message": "Use RTSP URL for streaming. WebSocket frame streaming is deprecated.",
         }
-        frame_json = json.dumps(frame_msg)
 
-        for ws in list(self._frame_subscriptions[did][channel]):
-            if not ws.closed:
-                try:
-                    await ws.send_str(frame_json)
-                except Exception as e:
-                    _LOGGER.warning("Failed to send frame to ws: %s", e)
 
-    async def _on_raw_frame(self, did: str, data: bytes, timestamp: int, seq: int, channel: int, frame_type: str):
-        """Handle raw frame callback."""
-        if did not in self._frame_subscriptions:
-            return
-        if channel not in self._frame_subscriptions[did]:
-            return
+async def run_server():
+    """Run the server."""
+    server = CameraProxyServer()
+    await server.start_async()
+    
+    # Keep running
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        await server.stop_async()
 
-        frame_msg = {
-            "type": "frame",
-            "did": did,
-            "channel": channel,
-            "frame_type": frame_type,
-            "timestamp": timestamp,
-            "sequence": seq,
-            "data": base64.b64encode(data).decode("ascii")
-        }
-        frame_json = json.dumps(frame_msg)
 
-        for ws in list(self._frame_subscriptions[did][channel]):
-            if not ws.closed:
-                try:
-                    await ws.send_str(frame_json)
-                except Exception as e:
-                    _LOGGER.warning("Failed to send frame to ws: %s", e)
-
-    async def _cleanup_connection(self, ws: web.WebSocketResponse):
-        """Clean up when WebSocket disconnects."""
-        _LOGGER.info("WebSocket connection closed")
-
-        # Remove from subscriptions
-        if ws in self._ws_connections:
-            for did, channels in self._ws_connections[ws].items():
-                if did in self._frame_subscriptions:
-                    for channel in channels:
-                        if channel in self._frame_subscriptions[did]:
-                            self._frame_subscriptions[did][channel].discard(ws)
-            del self._ws_connections[ws]
-
-    async def _send_response(self, ws: web.WebSocketResponse, msg_id: Optional[str], result: dict):
-        """Send success response."""
-        response = {"id": msg_id, "success": True, **result}
-        await ws.send_json(response)
-
-    async def _send_error(self, ws: web.WebSocketResponse, msg_id: Optional[str], error: str):
-        """Send error response."""
-        response = {"id": msg_id, "success": False, "error": error}
-        await ws.send_json(response)
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(run_server())

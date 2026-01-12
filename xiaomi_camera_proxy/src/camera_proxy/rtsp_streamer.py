@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2025 Xiaomi Corporation
+# This software may be used and distributed according to the terms of the Xiaomi Miloco License Agreement.
 """RTSP streamer - pushes H.264 to mediamtx."""
 import asyncio
 import logging
 import subprocess
-from typing import Optional, Dict
-from pathlib import Path
+from typing import Dict, Optional
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -120,10 +121,7 @@ class RTSPStreamer:
         """Stop RTSP stream for a camera."""
         stream_key = f"{did}_{channel}"
         
-        if stream_key not in self._streamers:
-            return
-        
-        # Cancel writer task
+        # Cancel tasks
         if stream_key in self._tasks:
             self._tasks[stream_key].cancel()
             try:
@@ -132,19 +130,32 @@ class RTSPStreamer:
                 pass
             del self._tasks[stream_key]
         
-        # Stop ffmpeg
-        process = self._streamers[stream_key]
-        try:
-            process.stdin.close()
-            process.terminate()
-            process.wait(timeout=5)
-        except Exception as e:
-            _LOGGER.warning("Error stopping stream %s: %s", stream_key, e)
-            process.kill()
+        if stream_key in self._error_tasks:
+            self._error_tasks[stream_key].cancel()
+            try:
+                await self._error_tasks[stream_key]
+            except asyncio.CancelledError:
+                pass
+            del self._error_tasks[stream_key]
         
-        del self._streamers[stream_key]
+        # Kill ffmpeg process
+        if stream_key in self._streamers:
+            process = self._streamers[stream_key]
+            if process.stdin:
+                process.stdin.close()
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            del self._streamers[stream_key]
+        
+        # Cleanup queue
         if stream_key in self._stream_queues:
             del self._stream_queues[stream_key]
+        
+        if stream_key in self._frame_counts:
+            del self._frame_counts[stream_key]
         
         _LOGGER.info("Stopped RTSP stream: %s", stream_key)
 
@@ -201,3 +212,7 @@ class RTSPStreamer:
         for stream_key in list(self._streamers.keys()):
             did, channel = stream_key.rsplit("_", 1)
             await self.stop_stream(did, int(channel))
+
+    def get_rtsp_url(self, did: str, channel: int = 0) -> str:
+        """Get RTSP URL for a camera stream."""
+        return f"rtsp://127.0.0.1:8554/camera/{did}/{channel}"

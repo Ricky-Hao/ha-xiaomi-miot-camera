@@ -1,7 +1,6 @@
-aiohttp>=3.9.0
-aiocache>=0.12
-aiofiles>=24.1
-pydantic>=2.4.0
-av>=15.0
-pillow>=10.3.0
+# Core dependencies
+# Install miot_kit from xiaomi-miloco repository
+miot_kit @ git+https://github.com/xiaomi/xiaomi-miloco.git#subdirectory=miot_kit
+
+# Additional dependencies not in miot_kit
 PyYAML>=6.0

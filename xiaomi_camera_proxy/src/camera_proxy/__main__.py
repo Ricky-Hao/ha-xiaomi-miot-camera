@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2025 Xiaomi Corporation
+# This software may be used and distributed according to the terms of the Xiaomi Miloco License Agreement.
 """Main entry point for camera proxy."""
 import argparse
 import asyncio
 import logging
 import sys
 
-from .server import CameraProxyServer
+from . import __version__
+from .server_v2 import CameraProxyServer
 
 
 def main():
@@ -33,12 +36,20 @@ def main():
     )
 
     logger = logging.getLogger(__name__)
-    logger.info("Starting Xiaomi MIoT Camera Proxy v%s", "0.3.4")
+    logger.info("Starting Xiaomi MIoT Camera Proxy v%s (using miot_kit)", __version__)
 
     # Run server
-    server = CameraProxyServer(host=args.host, port=args.port)
+    async def run():
+        server = CameraProxyServer(host=args.host, port=args.port)
+        await server.start_async()
+        try:
+            while True:
+                await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            await server.stop_async()
+
     try:
-        asyncio.run(server.run())
+        asyncio.run(run())
     except KeyboardInterrupt:
         logger.info("Shutting down...")
 
