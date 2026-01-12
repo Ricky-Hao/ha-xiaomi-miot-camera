@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.15] - 2026-01-12 (Integration + Add-on)
+
+### Fixed
+- **Fix camera auto-reconnect after integration reconfigure**: Cameras now automatically restart when tokens are refreshed via `set_tokens_async`
+- Previously, reconfiguring the integration would not reconnect cameras until Add-on restart
+
+### Changed
+- **Code cleanup**: Removed legacy WebSocket API code (not needed, project in active development)
+- **Simplified server**: Removed unused imports and WebSocket handlers
+- **Cleaner API**: Video quality is now Add-on config only, removed from HTTP API parameters
+
 ## [0.5.1] - 2026-01-12 (Add-on)
 
 ### Fixed

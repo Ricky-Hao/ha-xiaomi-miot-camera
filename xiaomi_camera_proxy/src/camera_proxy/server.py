@@ -2,34 +2,29 @@
 # Copyright (C) 2025 Xiaomi Corporation
 # This software may be used and distributed according to the terms of the Xiaomi Miloco License Agreement.
 """
-HTTP/WebSocket Server for Camera Proxy Add-on.
+HTTP Server for Camera Proxy Add-on.
 
-This is a simplified server that uses CameraService for all camera operations.
+This server uses CameraService for all camera operations.
 It provides:
-- HTTP endpoints for OAuth, device discovery, snapshots
-- WebSocket for real-time frame streaming (legacy support)
+- HTTP endpoints for OAuth, device discovery, camera control, snapshots
 - WebRTC streaming via MediaMTX (port 8889)
 """
 import asyncio
-import base64
-import json
 import logging
-from typing import Dict, Optional, Set
+from typing import Optional
 
-from aiohttp import web, WSMsgType
-
-from miot.types import MIoTCameraVideoQuality
+from aiohttp import web
 
 from .camera_service import CameraService
 from .rtsp_streamer import RTSPStreamer
 
 _LOGGER = logging.getLogger(__name__)
 
-__version__ = "0.4.0"
+__version__ = "0.6.15"
 
 
 class CameraProxyServer:
-    """Camera Proxy HTTP/WebSocket Server."""
+    """Camera Proxy HTTP Server."""
 
     def __init__(
         self, 
@@ -55,9 +50,6 @@ class CameraProxyServer:
         # Core services
         self._rtsp_streamer = RTSPStreamer(transcode_h264=transcode_h264)
         self._camera_service = CameraService(video_quality=video_quality)
-        
-        # WebSocket connections for legacy frame streaming
-        self._ws_connections: Dict[web.WebSocketResponse, Dict[str, Set[int]]] = {}
 
     async def start_async(self):
         """Start the server."""
@@ -112,9 +104,6 @@ class CameraProxyServer:
         # Snapshots
         app.router.add_get("/snapshot/{did}", self._handle_get_snapshot)
         app.router.add_get("/snapshot/{did}/{channel}", self._handle_get_snapshot)
-        
-        # Legacy WebSocket for frame streaming
-        app.router.add_get("/ws", self._handle_websocket)
 
     # ==================== Health & Info ====================
 
@@ -245,20 +234,16 @@ class CameraProxyServer:
         
         Always waits for stream to be ready before returning.
         If camera is already streaming and ready, returns immediately.
+        
+        Note: Video quality is configured in Add-on settings, not per-request.
         """
         did = request.match_info["did"]
         try:
             data = await request.json() if request.body_exists else {}
             
-            # Get quality value (default HIGH=3)
-            # Allow any int value for experimental testing
-            quality_int = data.get("quality", MIoTCameraVideoQuality.HIGH.value)
-            _LOGGER.info("Starting camera %s with quality=%d", did, quality_int)
-            
             await self._camera_service.start_camera_async(
                 did=did,
                 pin_code=data.get("pin_code"),
-                quality=quality_int,
                 enable_audio=data.get("enable_audio", False),
             )
             
@@ -309,97 +294,6 @@ class CameraProxyServer:
         except Exception as e:
             _LOGGER.exception("Error getting snapshot for %s", did)
             return web.json_response({"error": str(e)}, status=500)
-
-    # ==================== Legacy WebSocket ====================
-
-    async def _handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
-        """Handle legacy WebSocket connection for frame streaming."""
-        ws = web.WebSocketResponse()
-        await ws.prepare(request)
-        _LOGGER.info("WebSocket connection from %s", request.remote)
-        
-        self._ws_connections[ws] = {}
-        
-        try:
-            async for msg in ws:
-                if msg.type == WSMsgType.TEXT:
-                    await self._handle_ws_message(ws, msg.data)
-                elif msg.type == WSMsgType.ERROR:
-                    _LOGGER.error("WebSocket error: %s", ws.exception())
-        finally:
-            if ws in self._ws_connections:
-                del self._ws_connections[ws]
-        
-        return ws
-
-    async def _handle_ws_message(self, ws: web.WebSocketResponse, data: str):
-        """Handle WebSocket message (legacy API)."""
-        try:
-            message = json.loads(data)
-            msg_type = message.get("type")
-            msg_id = message.get("id")
-            
-            # Map old WebSocket commands to new HTTP-style handling
-            handlers = {
-                "init": self._ws_handle_init,
-                "create_camera": self._ws_handle_create_camera,
-                "start_camera": self._ws_handle_start_camera,
-                "stop_camera": self._ws_handle_stop_camera,
-                "get_status": self._ws_handle_get_status,
-                "subscribe_frames": self._ws_handle_subscribe_frames,
-            }
-            
-            handler = handlers.get(msg_type)
-            if handler:
-                result = await handler(ws, message)
-                await ws.send_json({"id": msg_id, "success": True, **result})
-            else:
-                await ws.send_json({"id": msg_id, "success": False, "error": f"Unknown type: {msg_type}"})
-                
-        except Exception as e:
-            _LOGGER.exception("WebSocket error")
-            await ws.send_json({"id": message.get("id"), "success": False, "error": str(e)})
-
-    async def _ws_handle_init(self, ws: web.WebSocketResponse, msg: dict) -> dict:
-        """Handle init via WebSocket."""
-        await self._camera_service.set_tokens_async(
-            cloud_server=msg.get("cloud_server", "cn"),
-            access_token=msg["access_token"],
-            refresh_token=msg.get("refresh_token", ""),
-            expires_ts=msg.get("expires_ts", 0),
-        )
-        return {"status": "ok"}
-
-    async def _ws_handle_create_camera(self, ws: web.WebSocketResponse, msg: dict) -> dict:
-        """Handle create_camera via WebSocket."""
-        # Cameras are auto-discovered, just return ok
-        return {"status": "ok", "did": msg.get("camera_info", {}).get("did")}
-
-    async def _ws_handle_start_camera(self, ws: web.WebSocketResponse, msg: dict) -> dict:
-        """Handle start_camera via WebSocket."""
-        did = msg.get("did")
-        await self._camera_service.start_camera_async(
-            did=did,
-            pin_code=msg.get("pin_code"),
-        )
-        return {"status": "ok"}
-
-    async def _ws_handle_stop_camera(self, ws: web.WebSocketResponse, msg: dict) -> dict:
-        """Handle stop_camera via WebSocket."""
-        await self._camera_service.stop_camera_async(msg.get("did"))
-        return {"status": "ok"}
-
-    async def _ws_handle_get_status(self, ws: web.WebSocketResponse, msg: dict) -> dict:
-        """Handle get_status via WebSocket."""
-        status = await self._camera_service.get_camera_status_async(msg.get("did"))
-        return {"status": "ok", "camera_status": status.value}
-
-    async def _ws_handle_subscribe_frames(self, ws: web.WebSocketResponse, msg: dict) -> dict:
-        """Handle subscribe_frames via WebSocket (legacy, deprecated)."""
-        return {
-            "status": "ok",
-            "message": "Use WebRTC for streaming. WebSocket frame streaming is deprecated.",
-        }
 
 
 async def run_server():

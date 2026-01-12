@@ -199,8 +199,3 @@ class CameraProxyHttpClient:
             else:
                 text = await resp.text()
                 raise Exception(f"HTTP {resp.status}: {text}")
-
-
-# Legacy WebSocket client for backward compatibility
-# Keep the old CameraProxyClient class name as alias
-CameraProxyClient = CameraProxyHttpClient

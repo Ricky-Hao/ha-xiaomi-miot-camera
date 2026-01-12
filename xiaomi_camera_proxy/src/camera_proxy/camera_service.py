@@ -189,7 +189,13 @@ class CameraService:
         refresh_token: str,
         expires_ts: int,
     ) -> None:
-        """Set tokens directly (from HA integration)."""
+        """Set tokens directly (from HA integration).
+        
+        After setting tokens, this will:
+        1. Save tokens to persistent storage
+        2. Re-initialize the camera manager with new tokens
+        3. Auto-start previously active cameras
+        """
         # Validate token is not a placeholder
         if access_token in ("managed_by_addon", "", None):
             _LOGGER.warning("Ignoring invalid placeholder token")
@@ -206,6 +212,9 @@ class CameraService:
         await self._init_camera_manager_async()
         
         _LOGGER.info("Tokens set successfully for server: %s", cloud_server)
+        
+        # Auto-start previously active cameras after token refresh
+        asyncio.create_task(self._delayed_auto_start_async())
 
     async def refresh_tokens_async(self) -> bool:
         """Refresh access token."""
