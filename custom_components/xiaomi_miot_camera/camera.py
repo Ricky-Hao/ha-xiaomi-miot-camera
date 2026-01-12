@@ -5,15 +5,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Callable
 
 import aiohttp
 from aiohttp import web
+from webrtc_models import RTCIceCandidateInit
 
 from homeassistant.components.camera import (
     Camera,
     CameraEntityFeature,
     StreamType,
+    WebRTCAnswer,
+    WebRTCError,
+    WebRTCSendMessage,
     async_get_still_stream,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -97,6 +101,9 @@ class XiaomiMiotCamera(Camera):
         
         # WebRTC WHEP endpoint
         self._whep_url = f"{WEBRTC_BASE_URL}/camera/{self._did}/{self._channel}/whep"
+        
+        # Track active WebRTC sessions
+        self._webrtc_sessions: dict[str, str] = {}  # session_id -> whep_resource_url
 
     async def stream_source(self) -> str | None:
         """Return the stream source.
@@ -107,8 +114,10 @@ class XiaomiMiotCamera(Camera):
         """
         return None
 
-    async def async_handle_web_rtc_offer(self, offer_sdp: str) -> str | None:
-        """Handle WebRTC offer and return answer SDP.
+    async def async_handle_async_webrtc_offer(
+        self, offer_sdp: str, session_id: str, send_message: WebRTCSendMessage
+    ) -> None:
+        """Handle the WebRTC offer and return the answer via callback.
         
         Uses MediaMTX's WHEP (WebRTC-HTTP Egress Protocol) endpoint for
         instant low-latency streaming without HA transcoding.
@@ -125,21 +134,66 @@ class XiaomiMiotCamera(Camera):
                 ) as resp:
                     if resp.status == 201:
                         answer_sdp = await resp.text()
+                        # Store the resource URL for later cleanup
+                        resource_url = resp.headers.get("Location")
+                        if resource_url:
+                            self._webrtc_sessions[session_id] = resource_url
                         _LOGGER.debug(
-                            "WebRTC offer/answer exchange successful for camera %s",
-                            self._did
+                            "WebRTC offer/answer exchange successful for camera %s (session: %s)",
+                            self._did, session_id
                         )
-                        return answer_sdp
+                        send_message(WebRTCAnswer(answer_sdp))
                     else:
                         error = await resp.text()
                         _LOGGER.error(
                             "WebRTC WHEP request failed: %s - %s",
                             resp.status, error
                         )
-                        return None
+                        send_message(WebRTCError("webrtc_offer_failed", f"WHEP error: {resp.status}"))
+        except asyncio.TimeoutError:
+            _LOGGER.error("WebRTC offer timeout for camera %s", self._did)
+            send_message(WebRTCError("webrtc_offer_failed", "Connection timeout"))
         except Exception as err:
             _LOGGER.error("WebRTC offer handling failed for camera %s: %s", self._did, err)
-            return None
+            send_message(WebRTCError("webrtc_offer_failed", str(err)))
+
+    async def async_on_webrtc_candidate(
+        self, session_id: str, candidate: RTCIceCandidateInit
+    ) -> None:
+        """Handle a WebRTC ICE candidate.
+        
+        MediaMTX WHEP handles ICE negotiation internally, so we just log this.
+        """
+        _LOGGER.debug(
+            "Received ICE candidate for camera %s session %s (handled by MediaMTX)",
+            self._did, session_id
+        )
+
+    def close_webrtc_session(self, session_id: str) -> None:
+        """Close a WebRTC session.
+        
+        Send DELETE to WHEP resource to clean up MediaMTX session.
+        """
+        resource_url = self._webrtc_sessions.pop(session_id, None)
+        if resource_url:
+            _LOGGER.debug("Closing WebRTC session %s for camera %s", session_id, self._did)
+            # Fire and forget the cleanup - don't block
+            asyncio.create_task(self._close_whep_session(resource_url))
+
+    async def _close_whep_session(self, resource_url: str) -> None:
+        """Send DELETE to WHEP resource to clean up session."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.delete(
+                    resource_url,
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    if resp.status in (200, 204):
+                        _LOGGER.debug("Closed WHEP session: %s", resource_url)
+                    else:
+                        _LOGGER.warning("Failed to close WHEP session: %s", resp.status)
+        except Exception as err:
+            _LOGGER.warning("Error closing WHEP session: %s", err)
 
     @property
     def device_info(self) -> DeviceInfo:

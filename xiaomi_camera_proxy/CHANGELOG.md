@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.19] - 2026-01-12 (Add-on)
+
+### Changed
+- **Add STUN servers to MediaMTX**: Use Google's public STUN servers for better NAT traversal
+- This should improve WebRTC connectivity in various network environments
+
+## [0.4.14] - 2026-01-12 (Integration)
+
+### Changed
+- **Upgrade to new async WebRTC API**: Use `async_handle_async_webrtc_offer` instead of deprecated `async_handle_web_rtc_offer`
+- **Add ICE candidate handling**: Implement `async_on_webrtc_candidate` method
+- **Add session cleanup**: Implement `close_webrtc_session` to properly clean up WHEP sessions
+- These changes should improve WebRTC streaming reliability and compatibility with newer Home Assistant versions
+
 ## [0.4.13] - 2026-01-12 (Integration)
 
 ### Fixed
