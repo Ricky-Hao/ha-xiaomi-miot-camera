@@ -211,6 +211,7 @@ class CameraService:
 
         # Get all devices
         self._device_list = await self._http_client.get_devices_async()
+        _LOGGER.info("Total devices from cloud: %d", len(self._device_list))
         
         # Filter cameras
         extra_info = await get_camera_extra_info()
@@ -225,8 +226,11 @@ class CameraService:
                     channel_count=channel_count,
                     camera_status=MIoTCameraStatus.DISCONNECTED,
                 )
+                _LOGGER.info("Found camera: %s (%s) with %d channel(s)", 
+                            device.name, device.model, channel_count)
         
-        _LOGGER.info("Discovered %d cameras", len(self._camera_list))
+        _LOGGER.info("Discovered %d cameras out of %d devices", 
+                    len(self._camera_list), len(self._device_list))
         return self._device_list
 
     async def get_cameras_async(self) -> Dict[str, MIoTCameraInfo]:
@@ -388,6 +392,8 @@ class CameraService:
 
     def _is_camera_device(self, device: MIoTDeviceInfo, extra_info) -> bool:
         """Check if device is a camera."""
+        _LOGGER.debug("Checking device: %s (model: %s)", device.did, device.model)
+        
         # Check by model prefix
         if device.model.startswith(("chuangmi.camera", "isa.camera", "xiaomi.camera", "mxiang.camera")):
             # Check denylist
@@ -395,13 +401,16 @@ class CameraService:
             if device.model in denylist:
                 _LOGGER.debug("Camera %s is in denylist", device.model)
                 return False
+            _LOGGER.debug("Device %s is a camera (model prefix match)", device.did)
             return True
         
         # Check allowlist for other device types (wifispeaker with camera)
         for cls_name, models in extra_info.allowlist.items():
             if device.model in models:
+                _LOGGER.debug("Device %s is in allowlist (%s)", device.did, cls_name)
                 return True
         
+        _LOGGER.debug("Device %s is not a camera", device.did)
         return False
 
     def _get_channel_count(self, model: str, extra_info) -> int:
