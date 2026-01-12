@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.17] - 2026-01-12 (Integration)
+
+### Fixed
+- **Sync camera status from Add-on during initialization**: Integration now queries Add-on for actual camera status
+  - When integration (re)loads, it syncs `is_streaming` from Add-on's camera status
+  - If camera is already streaming in Add-on, it will show as "Recording" (监控中) immediately
+  - Previously, `is_streaming` was always set to `False` on init, showing "Idle" (空闲) incorrectly
+
 ## [0.6.16] - 2026-01-12 (Integration + Add-on)
 
 ### Fixed

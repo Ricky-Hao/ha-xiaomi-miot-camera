@@ -115,17 +115,23 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
         cameras = await self._backend.get_cameras_async()
         _LOGGER.info("Found %d cameras from Add-on", len(cameras))
 
-        # Filter selected cameras
+        # Filter selected cameras and sync status from Add-on
         for did, camera_info in cameras.items():
             if not self._selected_cameras or did in self._selected_cameras:
-                self._cameras[did] = CameraData(camera_info=camera_info)
-                _LOGGER.info("Added camera: %s (%s)", camera_info.name, did)
-
-        # Don't start cameras here - they will be started on-demand when WebRTC stream is requested
-        # This makes integration setup much faster
+                # Get current status from Add-on (camera might already be streaming)
+                status = await self._backend.get_camera_status_async(did)
+                is_streaming = (status == MIoTCameraStatus.CONNECTED)
+                
+                self._cameras[did] = CameraData(
+                    camera_info=camera_info,
+                    status=status,
+                    is_streaming=is_streaming,
+                )
+                _LOGGER.info("Added camera: %s (%s), status=%s, streaming=%s", 
+                            camera_info.name, did, status.name, is_streaming)
         
         self._initialized = True
-        _LOGGER.info("Coordinator initialization complete (cameras will start on-demand)")
+        _LOGGER.info("Coordinator initialization complete")
 
     async def _start_camera(self, did: str) -> None:
         """Start streaming a camera."""
