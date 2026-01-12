@@ -43,13 +43,15 @@ async def async_setup_entry(
     cloud_server = entry.data.get(CONF_CLOUD_SERVER, "cn")
     oauth_info = entry.data.get(CONF_OAUTH_INFO)
     selected_cameras = entry.data.get(CONF_SELECTED_CAMERAS, [])
-    video_quality = entry.options.get(CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY)
+    # Ensure video_quality is int
+    raw_quality = entry.options.get(CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY)
+    video_quality = int(raw_quality) if raw_quality is not None else DEFAULT_VIDEO_QUALITY
 
     if not oauth_info:
         _LOGGER.error("Missing OAuth info in config entry")
         return False
 
-    _LOGGER.info("Starting with video_quality=%d (1=LOW, 3=HIGH, 4/5=experimental)", video_quality)
+    _LOGGER.info("Starting with video_quality=%d (1=LOW, 3=HIGH, 4/5=experimental) raw=%s", video_quality, raw_quality)
 
     # Create simplified coordinator (uses Add-on for all operations)
     coordinator = XiaomiCameraCoordinator(

@@ -46,7 +46,7 @@ _LOGGER = logging.getLogger(__name__)
 # Default Add-on URL
 DEFAULT_PROXY_URL = "http://127.0.0.1:8765"
 
-# Video quality options for selector
+# Video quality options for selector (keys must be int for proper handling)
 VIDEO_QUALITY_OPTIONS = {
     VIDEO_QUALITY_LOW: "Low (1)",
     VIDEO_QUALITY_HIGH: "High (3)",
@@ -323,8 +323,11 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
         
         if user_input is not None and not errors:
             new_selected = user_input.get(CONF_SELECTED_CAMERAS, [])
-            new_quality = user_input.get(CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY)
-            _LOGGER.debug("Options flow: user submitted, new_selected = %s, quality = %d", new_selected, new_quality)
+            # Ensure quality is int (voluptuous may return it as-is or string)
+            raw_quality = user_input.get(CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY)
+            new_quality = int(raw_quality) if raw_quality is not None else DEFAULT_VIDEO_QUALITY
+            _LOGGER.info("Options flow: user submitted, new_selected = %s, quality = %d (raw=%s, type=%s)", 
+                        new_selected, new_quality, raw_quality, type(raw_quality))
             
             # Remove entities and devices for cameras that are no longer selected
             await self._cleanup_removed_cameras(new_selected)
