@@ -10,9 +10,9 @@ echo "Starting Xiaomi MIoT Camera Proxy..."
 echo "Log level: ${LOG_LEVEL}"
 echo "Transcode H.265→H.264: ${TRANSCODE_H264}"
 echo ""
-echo "Architecture: go2rtc-based WebRTC streaming"
-echo "- RTSP streams: rtsp://<addon-host>:8554/camera/{did}/{channel}"
-echo "- Configure HA go2rtc to use these RTSP streams"
+echo "Architecture: Direct WebRTC streaming via MediaMTX"
+echo "- WebRTC (WHEP): http://<addon-host>:8889/camera/{did}/{channel}/whep"
+echo "- RTSP (internal): rtsp://localhost:8554/camera/{did}/{channel}"
 echo ""
 
 # Build transcode argument
@@ -23,14 +23,6 @@ else
     TRANSCODE_ARG="--no-transcode-h264"
 fi
 
-# Start mediamtx (RTSP server only) in background
-echo "Starting RTSP server..."
-/usr/local/bin/mediamtx /app/mediamtx.yml &
-MEDIAMTX_PID=$!
-
-# Wait for mediamtx to be ready
-sleep 2
-
 # Cleanup function
 cleanup() {
     echo "Shutting down..."
@@ -38,6 +30,30 @@ cleanup() {
     exit 0
 }
 trap cleanup SIGTERM SIGINT
+
+# Start mediamtx (RTSP + WebRTC server) in background
+echo "Starting MediaMTX (RTSP + WebRTC server)..."
+/usr/local/bin/mediamtx /app/mediamtx.yml 2>&1 &
+MEDIAMTX_PID=$!
+
+# Wait for MediaMTX to be ready (check RTSP port 8554)
+echo "Waiting for MediaMTX to be ready..."
+MAX_WAIT=30
+WAITED=0
+while ! nc -z localhost 8554 2>/dev/null; do
+    sleep 1
+    WAITED=$((WAITED + 1))
+    if [ $WAITED -ge $MAX_WAIT ]; then
+        echo "ERROR: MediaMTX failed to start within ${MAX_WAIT} seconds"
+        echo "Checking if MediaMTX process is running..."
+        if ! kill -0 $MEDIAMTX_PID 2>/dev/null; then
+            echo "MediaMTX process died. Check configuration."
+        fi
+        exit 1
+    fi
+    echo "Waiting for MediaMTX... (${WAITED}s)"
+done
+echo "MediaMTX is ready (RTSP on 8554, WebRTC on 8889)"
 
 # Start the proxy server
 cd /app

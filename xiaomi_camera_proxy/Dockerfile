@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ffmpeg \
     git \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # Install mediamtx (lightweight RTSP server)
@@ -52,7 +53,8 @@ RUN chmod +x /run.sh
 
 # Expose ports
 # 8765: HTTP API
-# 8554: RTSP streaming (for HA go2rtc)
-EXPOSE 8765 8554
+# 8554: RTSP streaming (internal, FFmpeg -> MediaMTX)
+# 8889: WebRTC (WHEP endpoint)
+EXPOSE 8765 8554 8889
 
 CMD ["/run.sh"]

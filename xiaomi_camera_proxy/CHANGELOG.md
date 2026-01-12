@@ -418,3 +418,12 @@ Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (exte
 - Add RTSP timeout parameter (30 seconds)
 - Increase encoder buffer size to 4MB
 - Improve FFmpeg error monitoring to show all output
+
+## [0.6.4] - 2026-01-12
+
+### Fixed
+- Fix MediaMTX not starting - add proper startup check with nc (netcat)
+- Wait up to 30 seconds for MediaMTX to be ready before starting Python
+- Add netcat-openbsd to Dockerfile for port checking
+- Add 8889 port to Dockerfile EXPOSE
+- Improve startup script error messages
