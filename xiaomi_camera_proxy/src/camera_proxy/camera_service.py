@@ -102,13 +102,14 @@ class CameraService:
         """Initialize the service."""
         self._rtsp_streamer = rtsp_streamer or RTSPStreamer()
         
-        # Load saved tokens
+        # Load saved tokens and initialize camera manager
         await self._load_tokens_async()
         
-        _LOGGER.info("Camera service initialized")
+        _LOGGER.info("Camera service initialized, camera_manager: %s", 
+                    "ready" if self._camera_manager else "not initialized")
         
         # Auto-start previously active cameras (after a brief delay for service stability)
-        if self._oauth_info:
+        if self._camera_manager:
             asyncio.create_task(self._delayed_auto_start_async())
 
     async def deinit_async(self) -> None:
@@ -204,12 +205,12 @@ class CameraService:
         
         if is_placeholder:
             _LOGGER.info("Received placeholder token, using existing Add-on tokens")
-            # Still trigger auto-start if we have existing tokens
-            if self._oauth_info:
-                _LOGGER.info("Triggering auto-start with existing tokens")
+            # Still trigger auto-start if we have initialized camera manager
+            if self._camera_manager:
+                _LOGGER.info("Triggering auto-start with existing camera manager")
                 asyncio.create_task(self._delayed_auto_start_async())
             else:
-                _LOGGER.warning("No existing tokens, cannot auto-start cameras")
+                _LOGGER.warning("Camera manager not initialized, cannot auto-start cameras")
             return
         
         # Real tokens received - update and save
@@ -647,6 +648,14 @@ class CameraService:
         try:
             # Wait for service to be fully ready
             await asyncio.sleep(2)
+            
+            # Check if camera manager is initialized
+            if not self._camera_manager:
+                _LOGGER.warning("Camera manager not initialized, cannot auto-start cameras")
+                return
+            
+            _LOGGER.info("Starting delayed auto-start, camera_manager initialized: %s", 
+                        self._camera_manager is not None)
             await self._load_and_start_active_cameras_async()
         except Exception as e:
             _LOGGER.error("Error in delayed auto-start: %s", e)

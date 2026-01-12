@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.19] - 2026-01-12 (Add-on)
+
+### Fixed
+- **Fix auto-start logic**: Check `_camera_manager` instead of `_oauth_info` for auto-start
+  - `init_async`: Was checking `_oauth_info` but should check `_camera_manager`
+  - `set_tokens_async` with placeholder: Was checking `_oauth_info` but should check `_camera_manager`
+  - Without camera_manager initialized, `start_camera_async` would fail
+- **Add debug logging**: Better logging to track auto-start flow
+
 ## [0.6.18] - 2026-01-12 (Integration)
 
 ### Added
