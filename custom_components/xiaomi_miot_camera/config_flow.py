@@ -295,6 +295,7 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
         
         if user_input is not None and not errors:
             new_selected = user_input.get(CONF_SELECTED_CAMERAS, [])
+            _LOGGER.warning("Options flow: user submitted, new_selected = %s", new_selected)
             
             # Remove entities and devices for cameras that are no longer selected
             await self._cleanup_removed_cameras(new_selected)
@@ -302,6 +303,7 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
             # Update config entry data with new selection
             new_data = dict(self._config_entry.data)
             new_data[CONF_SELECTED_CAMERAS] = new_selected
+            _LOGGER.warning("Options flow: updating config entry data")
             
             self.hass.config_entries.async_update_entry(
                 self._config_entry,
@@ -309,6 +311,7 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
             )
             
             # Reload the integration to apply changes
+            _LOGGER.warning("Options flow: reloading integration")
             await self.hass.config_entries.async_reload(self._config_entry.entry_id)
             
             return self.async_create_entry(title="", data={})
@@ -331,15 +334,24 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
         entity_registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
         
+        _LOGGER.warning("Cleanup: new_selected cameras = %s (type: %s)", 
+                       new_selected, type(new_selected))
+        
         # Find all entities for this config entry
         entities_to_remove = []
         devices_to_check = set()
         
-        for entity_entry in er.async_entries_for_config_entry(
+        all_entities = list(er.async_entries_for_config_entry(
             entity_registry, self._config_entry.entry_id
-        ):
+        ))
+        _LOGGER.warning("Cleanup: found %d entities for this config entry", len(all_entities))
+        
+        for entity_entry in all_entities:
             # Entity unique_id format is "{did}_{channel}"
             unique_id = entity_entry.unique_id
+            _LOGGER.warning("Cleanup: checking entity %s, unique_id=%s", 
+                          entity_entry.entity_id, unique_id)
+            
             if not unique_id:
                 continue
                 
@@ -348,20 +360,22 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
             parts = unique_id.rsplit("_", 1)
             did = parts[0] if len(parts) == 2 else unique_id
             
-            _LOGGER.debug("Checking entity %s with did %s, new_selected: %s", 
-                        entity_entry.entity_id, did, new_selected)
+            _LOGGER.warning("Cleanup: entity %s -> did=%s, in new_selected=%s", 
+                          entity_entry.entity_id, did, did in new_selected)
             
             # If this camera is no longer selected, mark for removal
             if did not in new_selected:
                 entities_to_remove.append(entity_entry.entity_id)
                 if entity_entry.device_id:
                     devices_to_check.add(entity_entry.device_id)
-                _LOGGER.info("Will remove entity %s (camera %s no longer selected)", 
-                           entity_entry.entity_id, did)
+                _LOGGER.warning("Will remove entity %s (camera %s no longer selected)", 
+                              entity_entry.entity_id, did)
+        
+        _LOGGER.warning("Cleanup: %d entities to remove", len(entities_to_remove))
         
         # Remove the entities first
         for entity_id in entities_to_remove:
-            _LOGGER.info("Removing entity: %s", entity_id)
+            _LOGGER.warning("Removing entity: %s", entity_id)
             entity_registry.async_remove(entity_id)
         
         # Check and remove devices that have no remaining entities
@@ -376,5 +390,5 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
             )
             
             if not remaining_entities:
-                _LOGGER.info("Removing device: %s", device_entry.name)
+                _LOGGER.warning("Removing device: %s", device_entry.name)
                 device_registry.async_remove_device(device_id)
