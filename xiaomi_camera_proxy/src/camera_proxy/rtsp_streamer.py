@@ -16,10 +16,6 @@ class RTSPStreamer:
     1. Receives raw H.264 NAL units via stdin
     2. Remuxes to RTSP format (no transcoding!)
     3. Publishes to mediamtx at rtsp://localhost:8554/camera/{did}/{channel}
-    
-    mediamtx handles on-demand:
-    - Stream starts when someone connects
-    - Automatically stops when no viewers
     """
 
     def __init__(self):
@@ -27,6 +23,8 @@ class RTSPStreamer:
         self._streamers: Dict[str, subprocess.Popen] = {}
         self._stream_queues: Dict[str, asyncio.Queue] = {}
         self._tasks: Dict[str, asyncio.Task] = {}
+        self._error_tasks: Dict[str, asyncio.Task] = {}
+        self._frame_counts: Dict[str, int] = {}
 
     async def start_stream(self, did: str, channel: int = 0) -> bool:
         """Start RTSP stream for a camera.
@@ -51,7 +49,7 @@ class RTSPStreamer:
             cmd = [
                 "ffmpeg",
                 "-hide_banner",
-                "-loglevel", "warning",
+                "-loglevel", "info",  # Changed to info to see more output
                 # Input: raw H.264 from stdin
                 "-f", "h264",
                 "-i", "pipe:0",
@@ -61,6 +59,8 @@ class RTSPStreamer:
                 "-rtsp_transport", "tcp",
                 rtsp_url
             ]
+            
+            _LOGGER.info("Starting FFmpeg: %s", " ".join(cmd))
             
             # Start ffmpeg process
             process = subprocess.Popen(
@@ -73,10 +73,16 @@ class RTSPStreamer:
             
             self._streamers[stream_key] = process
             self._stream_queues[stream_key] = asyncio.Queue(maxsize=100)
+            self._frame_counts[stream_key] = 0
             
             # Start writer task
             self._tasks[stream_key] = asyncio.create_task(
                 self._write_loop(stream_key, process)
+            )
+            
+            # Start error monitor task
+            self._error_tasks[stream_key] = asyncio.create_task(
+                self._error_monitor(stream_key, process)
             )
             
             _LOGGER.info("Started RTSP stream: %s -> %s", stream_key, rtsp_url)
@@ -85,6 +91,20 @@ class RTSPStreamer:
         except Exception as e:
             _LOGGER.error("Failed to start RTSP stream %s: %s", stream_key, e)
             return False
+
+    async def _error_monitor(self, stream_key: str, process: subprocess.Popen):
+        """Monitor FFmpeg stderr for errors."""
+        try:
+            loop = asyncio.get_event_loop()
+            while process.poll() is None:
+                # Read stderr in executor to not block
+                line = await loop.run_in_executor(
+                    None, process.stderr.readline
+                )
+                if line:
+                    _LOGGER.warning("FFmpeg [%s]: %s", stream_key, line.decode().strip())
+        except Exception as e:
+            _LOGGER.debug("Error monitor ended for %s: %s", stream_key, e)
 
     async def stop_stream(self, did: str, channel: int = 0):
         """Stop RTSP stream for a camera."""
@@ -129,13 +149,23 @@ class RTSPStreamer:
         stream_key = f"{did}_{channel}"
         
         if stream_key not in self._stream_queues:
+            _LOGGER.warning("No stream queue for %s, frame dropped", stream_key)
             return
+        
+        # Count frames
+        self._frame_counts[stream_key] = self._frame_counts.get(stream_key, 0) + 1
+        count = self._frame_counts[stream_key]
+        
+        # Log every 100 frames
+        if count == 1 or count % 100 == 0:
+            _LOGGER.info("RTSP push_frame [%s]: frame #%d, size=%d bytes", 
+                        stream_key, count, len(frame_data))
         
         try:
             # Non-blocking put (drop frame if queue full)
             self._stream_queues[stream_key].put_nowait(frame_data)
         except asyncio.QueueFull:
-            _LOGGER.debug("Stream queue full, dropping frame: %s", stream_key)
+            _LOGGER.warning("Stream queue full, dropping frame: %s", stream_key)
 
     async def _write_loop(self, stream_key: str, process: subprocess.Popen):
         """Write frames from queue to ffmpeg stdin."""

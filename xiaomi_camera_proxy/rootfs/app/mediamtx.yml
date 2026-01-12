@@ -1,5 +1,5 @@
 # MediaMTX configuration for Xiaomi Camera Proxy
-# This RTSP server receives H.264 streams from cameras and serves them on-demand
+# This RTSP server receives H.264 streams from cameras via FFmpeg publisher
 
 ###############################################
 # Global settings
@@ -19,12 +19,12 @@ protocols: [tcp]
 rtspAddress: :8554
 
 ###############################################
-# WebRTC (disabled for now)
+# WebRTC (disabled)
 
 webrtc: no
 
 ###############################################
-# HLS (disabled for now)
+# HLS (disabled)
 
 hls: no
 
@@ -36,30 +36,23 @@ apiAddress: :9997
 
 ###############################################
 # Path defaults
-# Paths are created dynamically via API
 
 pathDefaults:
-  # Source settings
+  # Source is FFmpeg publisher (not on-demand pull)
   source: publisher
-  sourceOnDemand: yes
-  sourceOnDemandStartTimeout: 10s
-  sourceOnDemandCloseAfter: 10s
+  
+  # Allow publisher to reconnect/overwrite
+  overridePublisher: yes
   
   # Recording (disabled)
   record: no
-  
-  # Overwrite stream (allow new publisher to take over)
-  overridePublisher: yes
 
 ###############################################
 # Paths
-# Camera streams will be published to /camera/{did}/{channel}
+# Camera streams published to /camera/{did}/{channel}
 # Example: rtsp://localhost:8554/camera/123456789/0
 
 paths:
-  # Dynamic paths - cameras register themselves
   ~^camera/(.+)/(\d+)$:
-    # On-demand: stream starts when someone connects, stops when everyone disconnects
-    sourceOnDemand: yes
-    sourceOnDemandStartTimeout: 10s
-    sourceOnDemandCloseAfter: 10s
+    source: publisher
+    overridePublisher: yes

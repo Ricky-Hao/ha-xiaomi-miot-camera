@@ -33,7 +33,7 @@ def main():
     )
 
     logger = logging.getLogger(__name__)
-    logger.info("Starting Xiaomi MIoT Camera Proxy v%s", "0.3.1")
+    logger.info("Starting Xiaomi MIoT Camera Proxy v%s", "0.3.2")
 
     # Run server
     server = CameraProxyServer(host=args.host, port=args.port)

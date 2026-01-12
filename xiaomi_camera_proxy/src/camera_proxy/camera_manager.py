@@ -160,6 +160,9 @@ class CameraInstance:
 
         # RTSP streamer (for live streaming)
         self._rtsp_streamer = rtsp_streamer
+        
+        # Frame counter for logging
+        self._frame_count = 0
 
         # Callbacks
         self._status_callbacks: List[Callable] = []
@@ -277,11 +280,14 @@ class CameraInstance:
             channel = header.contents.channel
             codec_id = header.contents.codec_id
             frame_type = header.contents.frame_type
-
-            _LOGGER.debug(
-                "Received raw frame: did=%s, codec=%d, channel=%d, type=%d, len=%d",
-                self._did, codec_id, channel, frame_type, len(frame_data)
-            )
+            
+            # Count frames and log periodically
+            self._frame_count += 1
+            if self._frame_count == 1 or self._frame_count % 100 == 0:
+                _LOGGER.info(
+                    "Raw frame #%d: did=%s, codec=%d, channel=%d, type=%d, len=%d",
+                    self._frame_count, self._did, codec_id, channel, frame_type, len(frame_data)
+                )
 
             # Check if video codec (H.264=4 or H.265=5)
             is_video = codec_id in (MIoTCameraCodec.VIDEO_H264, MIoTCameraCodec.VIDEO_H265)

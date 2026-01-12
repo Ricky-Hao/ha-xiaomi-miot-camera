@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.2] - 2026-01-12
+
+### Fixed
+- Remove invalid `sourceOnDemand` from mediamtx config (not needed for publisher mode)
+- Add FFmpeg error monitoring and logging
+- Add frame count logging to track data flow
+
+### Debug
+- Log every 100 frames received from camera
+- Log FFmpeg stderr output for troubleshooting
+
 ## [0.3.1] - 2026-01-12
 
 ### Fixed
