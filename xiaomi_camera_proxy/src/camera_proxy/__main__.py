@@ -57,6 +57,7 @@ def main():
 
     logger = logging.getLogger(__name__)
     logger.info("Starting Xiaomi MIoT Camera Proxy v%s (using miot_kit)", __version__)
+    logger.info("Transcode H.265→H.264: %s", transcode_h264)
     logger.info("Video quality: %d (1=LOW, 3=HIGH, 4/5=experimental)", args.video_quality)
 
     # Run server

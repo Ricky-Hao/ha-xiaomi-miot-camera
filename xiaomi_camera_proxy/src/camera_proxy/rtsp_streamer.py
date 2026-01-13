@@ -212,6 +212,7 @@ class RTSPStreamer:
         self._prepared_streams: set = set()
         self._transcode_h264 = transcode_h264
         self._frame_buffers: Dict[str, FrameBuffer] = {}
+        _LOGGER.info("RTSPStreamer initialized: transcode_h264=%s", transcode_h264)
 
     def _is_stream_running(self, stream_key: str) -> bool:
         """Check if FFmpeg process is still running."""
@@ -235,6 +236,9 @@ class RTSPStreamer:
             input_format = "hevc" if codec_id == 5 else "h264"
             
             need_transcode = self._transcode_h264 and codec_id == 5
+            
+            _LOGGER.info("Starting FFmpeg [%s]: codec=%s, transcode_h264=%s, need_transcode=%s",
+                        stream_key, input_format, self._transcode_h264, need_transcode)
             
             if need_transcode:
                 probesize = "5000000"
