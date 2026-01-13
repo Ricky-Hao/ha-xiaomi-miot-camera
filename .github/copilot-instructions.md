@@ -11,8 +11,14 @@ Xiaomi MIoT Camera Integration is a Home Assistant integration for viewing Xiaom
 
 The integration uses a **proxy-only architecture** with **WebRTC streaming**:
 - All camera streaming goes through the Camera Proxy Add-on
-- Add-on uses miot_kit to communicate with Xiaomi cloud
+- Add-on uses `miot_kit` from [xiaomi-miloco](https://github.com/xiaomi/xiaomi-miloco) to communicate with Xiaomi cloud
 - WebRTC via MediaMTX provides instant, low-latency playback
+- Only **China (cn)** region is supported
+
+## Current Version
+
+- **Integration**: 1.0.0 (`manifest.json`)
+- **Add-on**: 1.0.0 (`config.yaml`)
 
 ## Project Structure
 
@@ -20,22 +26,28 @@ The integration uses a **proxy-only architecture** with **WebRTC streaming**:
 ha-xiaomi-miot-camera/
 ├── custom_components/xiaomi_miot_camera/   # HA Integration (HACS)
 │   ├── miot/                               # MIoT types and proxy client
-│   │   ├── proxy_client.py                 # HTTP client for Add-on API
-│   │   ├── camera_backend.py               # Backend interface
-│   │   └── types.py                        # Pydantic models
-│   ├── camera.py                           # HA Camera entity (WebRTC)
-│   ├── coordinator.py                      # Data coordinator
-│   ├── config_flow.py                      # Configuration UI
+│   │   ├── proxy_client.py                 # HTTP client for Add-on API (CameraProxyHttpClient)
+│   │   ├── camera_backend.py               # Backend interface (CameraBackend)
+│   │   └── types.py                        # Pydantic models (MIoTCameraInfo, MIoTOauthInfo, etc.)
+│   ├── camera.py                           # HA Camera entity (XiaomiMiotCamera, WebRTC via WHEP)
+│   ├── coordinator.py                      # Data coordinator (XiaomiCameraCoordinator)
+│   ├── config_flow.py                      # Configuration UI (OAuth flow via Add-on)
+│   ├── const.py                            # Constants (DOMAIN, PLATFORMS, etc.)
+│   ├── strings.json                        # UI strings (English)
+│   ├── translations/                       # Localization (en.json, zh-Hans.json)
 │   └── manifest.json                       # Integration manifest
 ├── xiaomi_camera_proxy/                    # HA Add-on
 │   ├── src/camera_proxy/                   # Python source
-│   │   ├── camera_service.py               # Camera management service
-│   │   ├── server.py                       # HTTP API server
-│   │   ├── rtsp_streamer.py                # FFmpeg→RTSP streamer
+│   │   ├── camera_service.py               # Camera management service (CameraService)
+│   │   ├── server.py                       # HTTP API server (CameraProxyServer)
+│   │   ├── rtsp_streamer.py                # FFmpeg→RTSP streamer (RTSPStreamer, FFmpegWriter)
 │   │   └── __main__.py                     # Entry point
-│   ├── rootfs/app/mediamtx.yml             # MediaMTX config
-│   ├── config.yaml                         # Add-on configuration
-│   └── Dockerfile                          # Add-on container build
+│   ├── rootfs/
+│   │   ├── run.sh                          # Add-on startup script
+│   │   └── app/mediamtx.yml                # MediaMTX config (RTSP + WebRTC)
+│   ├── config.yaml                         # Add-on configuration (ports, options schema)
+│   ├── requirements.txt                    # Python dependencies (miot_kit from git)
+│   └── Dockerfile                          # Add-on container build (Debian bookworm)
 └── repository.json                         # Add-on repository manifest
 ```
 
@@ -43,7 +55,7 @@ ha-xiaomi-miot-camera/
 
 ### Data Flow
 ```
-Camera → miot_kit → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (external)
+Xiaomi Cloud → miot_kit → Camera Frames → FFmpeg → RTSP (internal) → MediaMTX → WebRTC (browser)
 ```
 
 ### Ports
@@ -59,42 +71,71 @@ HA Integration  ←→  HTTP API (8765)  ←→  Camera Proxy Add-on  ←→  mi
 HA Frontend     ←→  WebRTC (8889)   ←→  MediaMTX            ←→  FFmpeg    ←→  Camera Stream
 ```
 
+### Key Components
+
+#### Integration Side
+- **XiaomiCameraCoordinator**: Manages camera lifecycle, polls status every 10 seconds
+- **XiaomiMiotCamera**: Camera entity with native WebRTC support via WHEP
+- **CameraProxyHttpClient**: HTTP client for Add-on communication
+- **CameraBackend**: High-level abstraction over proxy client
+
+#### Add-on Side
+- **CameraProxyServer**: aiohttp server exposing REST API
+- **CameraService**: Core logic using miot_kit for camera operations
+- **RTSPStreamer**: Manages FFmpeg processes for video transcoding
+- **FFmpegWriter**: Thread-based writer to prevent asyncio blocking
+
+### Add-on Options (config.yaml)
+```yaml
+options:
+  log_level: info        # debug|info|warning|error
+  transcode_h264: true   # Transcode H.265→H.264 for browser compatibility
+  video_quality: 3       # 1=LOW, 3=HIGH, 4/5=experimental
+```
+
 ### HTTP API Endpoints
 
 ```python
 # Health & Info
-GET  /health
-GET  /info
+GET  /health                              # {"status": "ok", "version": "1.0.0", "authenticated": bool}
+GET  /info                                # {"version": str, "cloud_server": str, "camera_count": int}
 
 # OAuth
-GET  /oauth/servers
-POST /oauth/auth_url
-POST /oauth/callback
-POST /oauth/set_tokens
-POST /oauth/refresh
+GET  /oauth/servers                       # {"servers": {"cn": "China", ...}}
+POST /oauth/auth_url                      # Body: {"cloud_server": "cn", "redirect_uri": "..."} → {"auth_url": str}
+POST /oauth/callback                      # Body: {"code": str, "state": str} → {"status": "ok"}
+POST /oauth/set_tokens                    # Body: {"cloud_server": str, "access_token": str, "refresh_token": str}
+POST /oauth/refresh                       # Refresh access token → {"status": "ok"}
 
 # Devices
-GET  /devices
-GET  /cameras
+GET  /devices                             # {"devices": {did: MIoTDeviceInfo}}
+GET  /cameras                             # {"cameras": {did: MIoTCameraInfo}}
+
+# Configuration
+POST /config/cameras                      # Body: {"camera_dids": [...]} - Set cameras for auto-start
 
 # Camera Control
-POST /camera/{did}/start
-POST /camera/{did}/stop
-GET  /camera/{did}/status
+POST /camera/{did}/start                  # Body: {"pin_code": str?, "enable_audio": bool?} → {"status": "ok"}
+POST /camera/{did}/stop                   # → {"status": "ok"}
+GET  /camera/{did}/status                 # → {"status": int} (MIoTCameraStatus enum value)
 
 # Snapshots
-GET  /snapshot/{did}
-GET  /snapshot/{did}/{channel}
+GET  /snapshot/{did}                      # → image/jpeg
+GET  /snapshot/{did}/{channel}            # → image/jpeg
 ```
 
 ### WebRTC (WHEP)
-```python
-# MediaMTX WHEP endpoint
-POST http://localhost:8889/camera/{did}/{channel}/whep
+```bash
+# MediaMTX WHEP endpoint (handled by HA Frontend automatically)
+POST http://<addon-host>:8889/camera/{did}/{channel}/whep
 Content-Type: application/sdp
 Body: SDP Offer
 Response: SDP Answer (201 Created)
 ```
+
+### Stream Paths
+- **RTSP (internal)**: `rtsp://localhost:8554/camera/{did}/{channel}`
+- **WebRTC (WHEP)**: `http://localhost:8889/camera/{did}/{channel}/whep`
 
 ## Development Commands
 
@@ -113,8 +154,8 @@ ha core restart
 cd xiaomi_camera_proxy
 docker build -t xiaomi_camera_proxy .
 
-# Test Add-on locally
-docker run -p 8765:8765 -p 8889:8889 xiaomi_camera_proxy
+# Test Add-on locally (need /data directory for persistence)
+docker run -p 8765:8765 -p 8889:8889 -p 8554:8554 -v /tmp/data:/data xiaomi_camera_proxy
 ```
 
 ### Debugging
@@ -128,6 +169,21 @@ logger:
 
 Check Add-on logs in Home Assistant → Settings → Add-ons → Xiaomi MIoT Camera Proxy → Log
 
+### Testing HTTP API
+```bash
+# Health check
+curl http://localhost:8765/health
+
+# Get cameras (requires authentication)
+curl http://localhost:8765/cameras
+
+# Start camera
+curl -X POST http://localhost:8765/camera/{did}/start
+
+# Get snapshot
+curl http://localhost:8765/snapshot/{did} --output snapshot.jpg
+```
+
 ## Common Issues & Solutions
 
 ### HTTP 401 Authentication Error
@@ -136,30 +192,32 @@ Check Add-on logs in Home Assistant → Settings → Add-ons → Xiaomi MIoT Cam
 **Causes**:
 1. Wrong API host - must use `mico.api.mijia.tech`, not `api.io.mi.com`
 2. Expired access token - re-authenticate via integration config flow
-3. Region mismatch - ensure `cloud_server` matches user's region
-
-### Too Many Connections
-**Symptom**: Camera reports too many connections
-
-**Cause**: `stop_camera_async()` was not calling `destroy_camera_async()`
-
-**Solution**: Fixed in v0.4.18 - now properly releases connections when cameras stop
+3. Region mismatch - only `cn` (China) is supported
 
 ### WebRTC Not Working
 **Symptom**: Camera shows black screen or "Stream unavailable"
 
 **Causes**:
-1. MediaMTX not running - check add-on logs
-2. Port 8889 not accessible
-3. Browser doesn't support WebRTC
+1. MediaMTX not running - check add-on logs for startup errors
+2. Port 8889 not accessible - ensure `host_network: true` in add-on config
+3. Browser doesn't support WebRTC - try Chrome or Firefox
+4. H.265 not transcoded - ensure `transcode_h264: true` in add-on options
 
-### Add-on Version Not Updating
-**Symptom**: Add-on shows old version after update
+### Add-on Not Starting
+**Symptom**: Add-on shows as stopped or fails to start
 
-**Solution**: 
-1. Check all version files are updated (see Version Management section)
-2. Uninstall and reinstall the Add-on in Home Assistant
-3. Clear browser cache
+**Causes**:
+1. MediaMTX failed to start - check logs for port conflicts
+2. Missing dependencies - check Dockerfile build
+3. Architecture mismatch - only amd64 and aarch64 are supported
+
+### OAuth Flow Issues
+**Symptom**: Cannot complete OAuth authentication
+
+**Causes**:
+1. Add-on not running - start the add-on first
+2. Redirect URI mismatch - must use `https://mico.api.mijia.tech/login_redirect`
+3. Network issues - ensure HA can reach Xiaomi cloud
 
 ## Development Workflow
 
@@ -174,14 +232,16 @@ Check Add-on logs in Home Assistant → Settings → Add-ons → Xiaomi MIoT Cam
 1. Check Add-on logs first
 2. Add debug logging: `_LOGGER.debug("Variable: %s", var)`
 3. Test HTTP API directly: `curl http://localhost:8765/health`
-4. Test WebRTC: `curl -X POST http://localhost:8889/camera/{did}/0/whep`
+4. Test WebRTC: Open browser console, check for WHEP errors
 
 ### Release Checklist
-1. Update all version numbers (see Version Management)
-2. Update CHANGELOG.md
-3. Commit with message: `chore: Bump version to x.x.x`
-4. Push to GitHub
-5. Users reinstall Add-on to get new version
+1. Update version in `custom_components/xiaomi_miot_camera/manifest.json`
+2. Update version in `xiaomi_camera_proxy/config.yaml`
+3. Update version in `xiaomi_camera_proxy/src/camera_proxy/server.py` (`__version__`)
+4. Update CHANGELOG.md
+5. Commit with message: `chore: Bump version to x.x.x`
+6. Push to GitHub
+7. Users reinstall Add-on to get new version
 
 ## Code Style
 
@@ -189,7 +249,27 @@ Check Add-on logs in Home Assistant → Settings → Add-ons → Xiaomi MIoT Cam
 - Use type hints for function parameters and return values
 - Use `_LOGGER` for logging (not `print`)
 - Async functions should be named with `_async` suffix
+- Use Pydantic models for data validation (`types.py`)
 - Use absolute paths in Docker container code
+- Copyright header: `# Copyright (C) 2025 Xiaomi Corporation`
+
+## Key Files Reference
+
+### Integration
+- [manifest.json](custom_components/xiaomi_miot_camera/manifest.json): Integration metadata, version, dependencies
+- [camera.py](custom_components/xiaomi_miot_camera/camera.py): WebRTC camera entity implementation
+- [coordinator.py](custom_components/xiaomi_miot_camera/coordinator.py): Data coordinator, camera management
+- [config_flow.py](custom_components/xiaomi_miot_camera/config_flow.py): OAuth flow, camera selection UI
+- [proxy_client.py](custom_components/xiaomi_miot_camera/miot/proxy_client.py): HTTP client for Add-on API
+- [types.py](custom_components/xiaomi_miot_camera/miot/types.py): Pydantic models for camera data
+
+### Add-on
+- [config.yaml](xiaomi_camera_proxy/config.yaml): Add-on metadata, ports, options schema
+- [server.py](xiaomi_camera_proxy/src/camera_proxy/server.py): HTTP API implementation
+- [camera_service.py](xiaomi_camera_proxy/src/camera_proxy/camera_service.py): Core camera logic
+- [rtsp_streamer.py](xiaomi_camera_proxy/src/camera_proxy/rtsp_streamer.py): FFmpeg streaming, H.265→H.264 transcoding
+- [mediamtx.yml](xiaomi_camera_proxy/rootfs/app/mediamtx.yml): MediaMTX RTSP/WebRTC configuration
+- [run.sh](xiaomi_camera_proxy/rootfs/run.sh): Add-on startup script
 
 ## Commit Message Format
 
@@ -204,43 +284,5 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`
 Examples:
 - `feat: Add multi-channel camera support`
 - `fix: Use correct API host for camera library`
-- `chore: Bump add-on version to 0.2.2`
+- `chore: Bump version to 1.0.0`
 - `docs: Update installation guide`
-## Git Configuration
-
-### Commit Author Settings
-
-**⚠️ IMPORTANT**: GitHub blocks pushes that expose private email addresses. Always use the GitHub noreply email format.
-
-**Repository owner**: Hao (Ricky-Hao)
-**Noreply email**: `14084342+Ricky-Hao@users.noreply.github.com`
-
-### Before Committing
-
-Always use environment variables to set author/committer when creating commits:
-
-```bash
-GIT_COMMITTER_NAME="Hao" \
-GIT_COMMITTER_EMAIL="14084342+Ricky-Hao@users.noreply.github.com" \
-git commit --author="Hao <14084342+Ricky-Hao@users.noreply.github.com>" -m "message"
-```
-
-Or set global config first:
-```bash
-git config --global user.name "Hao"
-git config --global user.email "14084342+Ricky-Hao@users.noreply.github.com"
-```
-
-### If Push is Rejected (GH007 Error)
-
-If you see `remote: error: GH007: Your push would publish a private email address`:
-
-```bash
-# Fix the last commit with correct author info
-GIT_COMMITTER_NAME="Hao" \
-GIT_COMMITTER_EMAIL="14084342+Ricky-Hao@users.noreply.github.com" \
-git commit --amend --author="Hao <14084342+Ricky-Hao@users.noreply.github.com>" --no-edit
-
-# Then push
-git push --force-with-lease
-```
