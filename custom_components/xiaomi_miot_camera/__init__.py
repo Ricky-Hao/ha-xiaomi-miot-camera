@@ -32,10 +32,7 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> bool:
     """Set up Xiaomi MIoT Camera from a config entry."""
-    # Use simplified coordinator that delegates to Add-on
     from .coordinator import XiaomiCameraCoordinator
-    
-    _LOGGER.info("Setting up Xiaomi MIoT Camera integration")
 
     # Extract configuration
     cloud_server = entry.data.get(CONF_CLOUD_SERVER, "cn")
@@ -46,8 +43,7 @@ async def async_setup_entry(
         _LOGGER.error("Missing OAuth info in config entry")
         return False
 
-    # Create simplified coordinator (uses Add-on for all operations)
-    # Note: Video quality is now configured in the Add-on settings
+    # Create coordinator (uses Add-on for all operations)
     coordinator = XiaomiCameraCoordinator(
         hass=hass,
         cloud_server=cloud_server,
@@ -55,24 +51,19 @@ async def async_setup_entry(
         selected_cameras=selected_cameras,
     )
 
-    # Initialize the coordinator
     try:
         await coordinator.async_initialize()
     except Exception as err:
-        _LOGGER.error("Failed to initialize Xiaomi MIoT Camera: %s", err)
+        _LOGGER.error("Failed to initialize: %s", err)
         return False
 
-    # Store coordinator
     entry.runtime_data = coordinator
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
-    # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-    # Register update listener for options
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
-    _LOGGER.info("Xiaomi MIoT Camera integration setup complete")
+    _LOGGER.info("Xiaomi MIoT Camera setup complete with %d cameras", len(selected_cameras))
     return True
 
 
@@ -80,13 +71,9 @@ async def async_unload_entry(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> bool:
     """Unload a config entry."""
-    _LOGGER.info("Unloading Xiaomi MIoT Camera integration")
-
-    # Unload platforms
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     if unload_ok:
-        # Clean up coordinator
         coordinator = hass.data[DOMAIN].pop(entry.entry_id)
         await coordinator.async_shutdown()
 

@@ -11,8 +11,6 @@ The flow is:
 """
 from __future__ import annotations
 
-import base64
-import json
 import logging
 from typing import Any
 
@@ -101,7 +99,6 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     cloud_server=self._cloud_server,
                     redirect_uri=self._oauth_redirect_uri,
                 )
-                _LOGGER.info("Generated OAuth URL via Add-on")
                 return await self.async_step_auth()
             except Exception as err:
                 _LOGGER.error("Failed to get auth URL: %s", err)
@@ -116,44 +113,29 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_auth(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the auth step - user pastes base64 OAuth result."""
+        """Handle the auth step - user authenticates via OAuth."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            oauth_result = user_input.get("oauth_result", "").strip()
+            code = user_input.get("code", "").strip()
+            state = user_input.get("state", "").strip()
 
-            if oauth_result:
+            if code and state:
                 try:
-                    # Decode base64 string
-                    decoded = base64.b64decode(oauth_result).decode("utf-8")
-                    oauth_data = json.loads(decoded)
+                    # Send callback to Add-on
+                    success = await self._proxy_client.handle_oauth_callback_async(code, state)
                     
-                    code = oauth_data.get("code", "").strip()
-                    state = oauth_data.get("state", "").strip()
-                    
-                    if code and state:
-                        # Send callback to Add-on
-                        success = await self._proxy_client.handle_oauth_callback_async(code, state)
+                    if success:
+                        # Store minimal oauth info (Add-on manages the actual tokens)
+                        self._oauth_info = {
+                            "access_token": "managed_by_addon",
+                            "refresh_token": "managed_by_addon",
+                            "expires_ts": 0,
+                        }
                         
-                        if success:
-                            _LOGGER.info("OAuth authentication successful")
-                            
-                            # Store minimal oauth info (Add-on manages the actual tokens)
-                            self._oauth_info = {
-                                "access_token": "managed_by_addon",
-                                "refresh_token": "managed_by_addon",
-                                "expires_ts": 0,
-                            }
-                            
-                            return await self.async_step_cameras()
-                        else:
-                            errors["base"] = "invalid_auth"
+                        return await self.async_step_cameras()
                     else:
-                        _LOGGER.error("Missing code or state in OAuth result")
                         errors["base"] = "invalid_auth"
-                except (ValueError, json.JSONDecodeError) as err:
-                    _LOGGER.error("Failed to decode OAuth result: %s", err)
-                    errors["base"] = "invalid_oauth_result"
                 except Exception as err:
                     _LOGGER.error("OAuth callback failed: %s", err)
                     errors["base"] = "invalid_auth"
@@ -163,7 +145,8 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="auth",
             data_schema=vol.Schema({
-                vol.Required("oauth_result"): str,
+                vol.Required("code"): str,
+                vol.Required("state"): str,
             }),
             errors=errors,
             description_placeholders={
@@ -227,7 +210,6 @@ class XiaomiMiotCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._cameras = {
                     did: info.name for did, info in cameras.items()
                 }
-                _LOGGER.info("Found %d cameras via Add-on", len(self._cameras))
             except Exception as err:
                 _LOGGER.error("Failed to get cameras: %s", err)
                 errors["base"] = "cannot_connect"
@@ -302,14 +284,12 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
                 did: camera.name
                 for did, camera in all_cameras.items()
             }
-            _LOGGER.debug("Options flow: found %d cameras from Add-on", len(camera_options))
         except Exception as err:
             _LOGGER.error("Failed to get cameras from Add-on: %s", err)
             errors["base"] = "cannot_connect"
         
         if user_input is not None and not errors:
             new_selected = user_input.get(CONF_SELECTED_CAMERAS, [])
-            _LOGGER.info("Options flow: user submitted, new_selected = %s", new_selected)
             
             # Remove entities and devices for cameras that are no longer selected
             await self._cleanup_removed_cameras(new_selected)
@@ -317,7 +297,6 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
             # Update config entry data with new selection
             new_data = dict(self._config_entry.data)
             new_data[CONF_SELECTED_CAMERAS] = new_selected
-            _LOGGER.debug("Options flow: updating config entry data")
             
             self.hass.config_entries.async_update_entry(
                 self._config_entry,
@@ -325,7 +304,6 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
             )
             
             # Reload the integration to apply changes
-            _LOGGER.debug("Options flow: reloading integration")
             await self.hass.config_entries.async_reload(self._config_entry.entry_id)
             
             return self.async_create_entry(title="", data={})
@@ -348,63 +326,42 @@ class XiaomiMiotCameraOptionsFlow(config_entries.OptionsFlow):
         entity_registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
         
-        _LOGGER.debug("Cleanup: new_selected cameras = %s", new_selected)
-        
         # Find all entities for this config entry
         entities_to_remove = []
-        # Track which devices belong to removed cameras and all their entities
-        device_entity_count: dict[str, int] = {}  # device_id -> total entity count
-        device_removed_count: dict[str, int] = {}  # device_id -> removed entity count
-        devices_to_remove: set[str] = set()
+        devices_to_check = set()
         
         all_entities = list(er.async_entries_for_config_entry(
             entity_registry, self._config_entry.entry_id
         ))
-        _LOGGER.debug("Cleanup: found %d entities for this config entry", len(all_entities))
         
-        # First pass: count entities per device and identify entities to remove
         for entity_entry in all_entities:
-            device_id = entity_entry.device_id
-            if device_id:
-                device_entity_count[device_id] = device_entity_count.get(device_id, 0) + 1
-            
-            # Entity unique_id format is "{did}_{channel}"
             unique_id = entity_entry.unique_id
             if not unique_id:
                 continue
                 
             # Extract did from unique_id (format: "did_channel")
-            # did is typically a number, channel is 0, 1, etc.
             parts = unique_id.rsplit("_", 1)
             did = parts[0] if len(parts) == 2 else unique_id
             
             # If this camera is no longer selected, mark for removal
             if did not in new_selected:
                 entities_to_remove.append(entity_entry.entity_id)
-                if device_id:
-                    device_removed_count[device_id] = device_removed_count.get(device_id, 0) + 1
-                _LOGGER.debug("Will remove entity %s (camera %s no longer selected)", 
-                              entity_entry.entity_id, did)
+                if entity_entry.device_id:
+                    devices_to_check.add(entity_entry.device_id)
         
-        # Determine which devices should be removed (all their entities are being removed)
-        for device_id, total_count in device_entity_count.items():
-            removed_count = device_removed_count.get(device_id, 0)
-            if removed_count >= total_count:
-                devices_to_remove.add(device_id)
-                _LOGGER.debug("Device %s will be removed (all %d entities removed)", 
-                             device_id, total_count)
-        
-        _LOGGER.debug("Cleanup: %d entities to remove, %d devices to remove", 
-                     len(entities_to_remove), len(devices_to_remove))
-        
-        # Remove the entities first
+        # Remove the entities
         for entity_id in entities_to_remove:
-            _LOGGER.debug("Removing entity: %s", entity_id)
             entity_registry.async_remove(entity_id)
         
         # Remove devices that have no remaining entities
-        for device_id in devices_to_remove:
+        for device_id in devices_to_check:
             device_entry = device_registry.async_get(device_id)
-            if device_entry:
-                _LOGGER.info("Removing device: %s (%s)", device_entry.name, device_id)
+            if not device_entry:
+                continue
+            
+            remaining_entities = er.async_entries_for_device(
+                entity_registry, device_id, include_disabled_entities=True
+            )
+            
+            if not remaining_entities:
                 device_registry.async_remove_device(device_id)

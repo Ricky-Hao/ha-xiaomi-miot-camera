@@ -8,17 +8,10 @@
             },
             "auth": {
                 "title": "Xiaomi Account Login",
-                "description": "Please login to your Xiaomi account:\n\n**Step 1:** Click the link below to open Xiaomi login page:\n[Open Login Page]({auth_url})\n\n**Step 2:** Login with your Xiaomi account and authorize.\n\n**Step 3:** After authorization, you will see a page with a Base64 string. Copy the entire string.\n\n**Step 4:** Paste the Base64 string below and click Submit.",
+                "description": "Please login to your Xiaomi account:\n\n**Step 1:** Click the link below to open Xiaomi login page:\n[Open Login Page]({auth_url})\n\n**Step 2:** Login with your Xiaomi account and authorize.\n\n**Step 3:** After authorization, copy the `code` and `state` parameters from the redirect URL.\n\n**Step 4:** Paste the values below and click Submit.",
                 "data": {
-                    "oauth_result": "OAuth Result (Base64 string)"
-                }
-            },
-            "auth_manual": {
-                "title": "Manual Token Input",
-                "description": "Enter your Xiaomi OAuth tokens manually.",
-                "data": {
-                    "access_token": "Access Token",
-                    "refresh_token": "Refresh Token (optional)"
+                    "code": "Authorization Code",
+                    "state": "State"
                 }
             },
             "cameras": {
@@ -30,9 +23,8 @@
             }
         },
         "error": {
-            "cannot_connect": "Failed to connect to Camera Proxy Add-on or Xiaomi cloud service",
+            "cannot_connect": "Failed to connect to Camera Proxy Add-on",
             "invalid_auth": "Invalid authentication. Please check your credentials and try again.",
-            "invalid_oauth_result": "Invalid OAuth result. Please make sure you copied the complete Base64 string.",
             "unknown": "An unexpected error occurred"
         },
         "abort": {
@@ -44,12 +36,15 @@
     "options": {
         "step": {
             "init": {
-                "title": "Xiaomi MIoT Camera Options",
-                "description": "Configure your Xiaomi MIoT Camera integration.\n\n**Note:** Video quality is now configured in the Add-on settings.",
+                "title": "Select Cameras",
+                "description": "Select the cameras you want to add to Home Assistant.\n\n**Note:** Video quality is configured in the Add-on settings.",
                 "data": {
-                    "selected_cameras": "Selected Cameras"
+                    "selected_cameras": "Cameras"
                 }
             }
+        },
+        "error": {
+            "cannot_connect": "Failed to connect to Camera Proxy Add-on"
         }
     }
 }

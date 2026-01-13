@@ -20,7 +20,7 @@ from .rtsp_streamer import RTSPStreamer
 
 _LOGGER = logging.getLogger(__name__)
 
-__version__ = "0.6.23"
+__version__ = "1.0.0"
 
 
 class CameraProxyServer:
@@ -53,20 +53,17 @@ class CameraProxyServer:
 
     async def start_async(self):
         """Start the server."""
-        # Initialize camera service
         await self._camera_service.init_async(self._rtsp_streamer)
         
-        # Setup web app
         self._app = web.Application()
         self._setup_routes()
         
-        # Start server
         self._runner = web.AppRunner(self._app)
         await self._runner.setup()
         site = web.TCPSite(self._runner, self._host, self._port)
         await site.start()
         
-        _LOGGER.info("Server started on %s:%d (version %s)", self._host, self._port, __version__)
+        _LOGGER.info("Server started on %s:%d (v%s)", self._host, self._port, __version__)
 
     async def stop_async(self):
         """Stop the server."""
@@ -74,8 +71,6 @@ class CameraProxyServer:
         
         if self._runner:
             await self._runner.cleanup()
-        
-        _LOGGER.info("Server stopped")
 
     def _setup_routes(self):
         """Setup HTTP routes."""

@@ -1,25 +1,10 @@
 # Copyright (C) 2025 Xiaomi Corporation
 # This software may be used and distributed according to the terms of the Xiaomi Miloco License Agreement.
-"""Simplified coordinator for Xiaomi MIoT Camera integration.
-
-This version relies on the Camera Proxy Add-on for all camera operations.
-The Add-on handles:
-- OAuth authentication
-- Device discovery  
-- Camera streaming (WebRTC)
-- Snapshot generation
-
-The Integration just needs to:
-- Pass OAuth tokens to Add-on
-- Get camera list from Add-on
-- Handle WebRTC signaling
-- Fetch snapshots via HTTP
-"""
+"""Coordinator for Xiaomi MIoT Camera integration."""
 from __future__ import annotations
 
-import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
@@ -28,7 +13,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .miot.camera_backend import CameraBackend, check_proxy_available
 from .miot.types import MIoTOauthInfo, MIoTCameraInfo, MIoTCameraStatus
-
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -95,8 +79,6 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
         if self._initialized:
             return
 
-        _LOGGER.info("Initializing Xiaomi MIoT Camera coordinator")
-
         # Check if Add-on is available
         if not await check_proxy_available(self._proxy_url):
             raise RuntimeError(
@@ -108,27 +90,24 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
         self._backend = CameraBackend(proxy_url=self._proxy_url)
         
         # Initialize backend with tokens
-        version = await self._backend.init_async(
+        await self._backend.init_async(
             cloud_server=self._cloud_server,
             access_token=self._oauth_info.access_token,
             refresh_token=self._oauth_info.refresh_token,
             expires_ts=self._oauth_info.expires_ts,
         )
-        _LOGGER.info("Camera Proxy Add-on version: %s", version)
 
-        # Get cameras from Add-on (it handles discovery)
+        # Get cameras from Add-on
         cameras = await self._backend.get_cameras_async()
-        _LOGGER.info("Found %d cameras from Add-on", len(cameras))
 
         # Determine which cameras to use
         configured_dids = []
         
-        # Filter selected cameras and sync status from Add-on
         for did, camera_info in cameras.items():
             if not self._selected_cameras or did in self._selected_cameras:
                 configured_dids.append(did)
                 
-                # Get current status from Add-on (camera might already be streaming)
+                # Get current status from Add-on
                 status = await self._backend.get_camera_status_async(did)
                 is_streaming = (status == MIoTCameraStatus.CONNECTED)
                 
@@ -137,16 +116,13 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
                     status=status,
                     is_streaming=is_streaming,
                 )
-                _LOGGER.info("Added camera: %s (%s), status=%s, streaming=%s", 
-                            camera_info.name, did, status.name, is_streaming)
         
-        # Tell Add-on which cameras are configured (for auto-start on boot)
+        # Tell Add-on which cameras are configured
         if configured_dids:
             await self._backend.set_configured_cameras_async(configured_dids)
-            _LOGGER.info("Configured %d cameras for auto-start: %s", len(configured_dids), configured_dids)
         
         self._initialized = True
-        _LOGGER.info("Coordinator initialization complete")
+        _LOGGER.info("Coordinator initialized with %d cameras", len(configured_dids))
 
     async def _start_camera(self, did: str) -> None:
         """Start streaming a camera."""
@@ -154,15 +130,10 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
             return
 
         try:
-            # Start camera via Add-on (ensures WebRTC stream is ready)
-            # Video quality is configured in Add-on settings
             await self._backend.start_camera_async(did=did)
             
             self._cameras[did].is_streaming = True
             self._cameras[did].status = MIoTCameraStatus.CONNECTED
-            
-            _LOGGER.info("Started camera %s", did)
-            
         except Exception as err:
             _LOGGER.error("Failed to start camera %s: %s", did, err)
             self._cameras[did].status = MIoTCameraStatus.ERROR
@@ -174,7 +145,6 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
     async def async_stop_camera(self, did: str) -> None:
         """Stop streaming a camera."""
         if did not in self._cameras:
-            _LOGGER.warning("Camera %s not found", did)
             return
         
         try:
@@ -183,9 +153,6 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
             
             self._cameras[did].is_streaming = False
             self._cameras[did].status = MIoTCameraStatus.DISCONNECTED
-            
-            _LOGGER.info("Stopped camera %s", did)
-            
         except Exception as err:
             _LOGGER.error("Failed to stop camera %s: %s", did, err)
 
@@ -203,17 +170,14 @@ class XiaomiCameraCoordinator(DataUpdateCoordinator):
 
     async def async_shutdown(self) -> None:
         """Shutdown the coordinator."""
-        _LOGGER.info("Shutting down Xiaomi MIoT Camera coordinator")
-
         # Stop all cameras
         for did in self._cameras:
             try:
                 if self._backend:
                     await self._backend.stop_camera_async(did)
-            except Exception as err:
-                _LOGGER.debug("Error stopping camera %s: %s", did, err)
+            except Exception:
+                pass
 
-        # Close backend
         if self._backend:
             await self._backend.deinit_async()
 

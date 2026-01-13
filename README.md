@@ -1,18 +1,18 @@
 # Xiaomi MIoT Camera for Home Assistant
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
+[![version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/Ricky-Hao/ha-xiaomi-miot-camera)
 
 This custom component integrates Xiaomi MIoT cameras into Home Assistant, allowing you to view live video streams from your Xiaomi smart home cameras.
 
 ## Features
 
 - 🎥 **Instant WebRTC streaming** - Sub-second latency live video
-- 🔐 Secure OAuth2 authentication with Xiaomi account
-- 📷 Still image capture (snapshots)
-- 🌍 Support for multiple cloud regions (China, Europe, India, Russia, Singapore, US)
-- 🔄 Auto-reconnection on connection loss
-- 📺 Multi-channel camera support
-- 🐳 **Home Assistant OS support via Add-on**
+- 🔐 **Secure OAuth2 authentication** with Xiaomi account
+- 📷 **Still image capture** (snapshots)
+- 🔄 **Auto-reconnection** on connection loss
+- 📺 **Multi-channel camera support**
+- 🐳 **Home Assistant OS support** via Add-on
 
 ## Requirements
 

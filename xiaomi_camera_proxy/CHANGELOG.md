@@ -1,102 +1,40 @@
 # Changelog
 
-## [0.6.20] - 2026-01-13 (Add-on)
+## [1.0.0] - 2026-01-13
 
-### Added
-- **Debug logging for auto-start**: Added INFO level logs to track auto-start flow
-  - Log when checking for active cameras file
-  - Log file path and contents
-  - Log when file doesn't exist or is empty
-  - Changed save log from DEBUG to INFO level
+### 🎉 First Stable Release
 
-## [0.6.19] - 2026-01-12 (Add-on)
+This is the first stable release of the Xiaomi MIoT Camera integration and Camera Proxy Add-on.
 
-### Fixed
-- **Fix auto-start logic**: Check `_camera_manager` instead of `_oauth_info` for auto-start
-  - `init_async`: Was checking `_oauth_info` but should check `_camera_manager`
-  - `set_tokens_async` with placeholder: Was checking `_oauth_info` but should check `_camera_manager`
-  - Without camera_manager initialized, `start_camera_async` would fail
-- **Add debug logging**: Better logging to track auto-start flow
+### Features
 
-## [0.6.18] - 2026-01-12 (Integration)
+- **WebRTC Streaming**: Sub-second latency video via MediaMTX WHEP protocol
+- **Automatic H.265→H.264 transcoding**: For browser WebRTC compatibility
+- **OAuth2 Authentication**: Secure login with Xiaomi account
+- **Device Discovery**: Automatic detection of Xiaomi cameras
+- **Multi-channel Support**: Support for cameras with multiple channels
+- **Auto-reconnection**: Automatic reconnection on connection loss
+- **Auto-start**: Cameras automatically start on Add-on boot
+- **Snapshot Support**: JPEG snapshot generation
 
-### Added
-- **Periodic status polling**: Coordinator now polls Add-on every 10 seconds for camera status
-  - Camera entity inherits from `CoordinatorEntity` for automatic updates
-  - When Add-on finishes async camera reconnection, status will update within 10 seconds
-  - `is_recording` (监控中/空闲) updates automatically without manual refresh
+### Architecture
 
-### Why this matters
-- When integration reconfigures, Add-on reconnects cameras **asynchronously**
-- Previously, status was only checked at init (before reconnection finished)
-- Now, polling ensures status syncs even after async reconnection completes
+- Integration communicates with Add-on via HTTP API (port 8765)
+- MediaMTX provides WebRTC streaming (port 8889)
+- FFmpeg handles video transcoding (RTSP internal)
+- miot_kit library handles Xiaomi cloud communication
 
-## [0.6.17] - 2026-01-12 (Integration)
+### Configuration Options
 
-### Fixed
-- **Sync camera status from Add-on during initialization**: Integration now queries Add-on for actual camera status
-  - When integration (re)loads, it syncs `is_streaming` from Add-on's camera status
-  - If camera is already streaming in Add-on, it will show as "Recording" (监控中) immediately
-  - Previously, `is_streaming` was always set to `False` on init, showing "Idle" (空闲) incorrectly
+- `log_level`: Logging verbosity (debug, info, warning, error)
+- `transcode_h264`: Enable H.265 to H.264 transcoding (default: true)
+- `video_quality`: Video quality setting (1=LOW, 3=HIGH, default: 3)
 
-## [0.6.16] - 2026-01-12 (Integration + Add-on)
+---
 
-### Fixed
-- **Fix camera auto-reconnect after integration reconfigure**: Now properly handles placeholder tokens
-  - When integration sends "managed_by_addon" placeholder, Add-on uses existing saved tokens and triggers auto-start
-  - Previously, placeholder tokens were ignored, preventing auto-reconnect
-- **Fix camera state showing "Idle" instead of "Recording"**: Added `is_recording` property to camera entity
-  - When streaming, camera now shows "监控中" (Recording) instead of "空闲" (Idle)
+## Previous Development Versions
 
-## [0.6.15] - 2026-01-12 (Integration + Add-on)
-
-### Fixed
-- **Fix camera auto-reconnect after integration reconfigure**: Cameras now automatically restart when tokens are refreshed via `set_tokens_async`
-- Previously, reconfiguring the integration would not reconnect cameras until Add-on restart
-
-### Changed
-- **Code cleanup**: Removed legacy WebSocket API code (not needed, project in active development)
-- **Simplified server**: Removed unused imports and WebSocket handlers
-- **Cleaner API**: Video quality is now Add-on config only, removed from HTTP API parameters
-
-## [0.5.1] - 2026-01-12 (Add-on)
-
-### Fixed
-- **Fix first frame loss**: First frame containing VPS/SPS/PPS is now properly sent to FFmpeg
-- Previously, first frame was used for codec detection but lost before FFmpeg started
-- This caused "PPS id out of range" errors for some cameras
-
-### Changed
-- **Reduce log noise**: FFmpeg log level changed to warning, periodic frame logs reduced to every 500 frames
-- **Simplified code**: Removed redundant logging and unused variables
-
-## [0.5.0] - 2026-01-12 (Integration + Add-on)
-
-### Changed - Architecture Refactoring
-- **Switch to go2rtc-based WebRTC streaming**: Major architecture simplification
-- **Add-on changes**:
-  - MediaMTX now only serves RTSP (WebRTC disabled)
-  - RTSP streams available at `rtsp://<host>:8554/camera/{did}/{channel}`
-  - Removed port 8889 (WebRTC), kept only 8765 (API) and 8554 (RTSP)
-- **Integration changes**:
-  - `stream_source()` now returns RTSP URL instead of None
-  - Removed all custom WHEP/WebRTC code
-  - HA's native go2rtc handles WebRTC conversion automatically
-- **Benefits**:
-  - Simpler architecture with fewer moving parts
-  - Leverages HA's battle-tested go2rtc for WebRTC
-  - Better codec compatibility (go2rtc handles H.265/H.264 transcoding)
-  - Improved reliability and maintainability
-
-## [0.4.21] - 2026-01-12 (Add-on)
-
-### Fixed
-- **Fix HEVC parameter set detection**: Increased FFmpeg probesize to 5MB and analyzeduration to 5s
-- Previous probesize (32 bytes) was too small to find VPS/SPS/PPS parameter sets
-- This caused "PPS id out of range" and "dimensions not set" errors
-- FFmpeg now waits for enough data to properly detect video parameters
-
-## [0.4.20] - 2026-01-12 (Add-on)
+For historical changelog entries from development versions (0.x.x), see the git history.
 
 ### Changed
 - **Enhanced FFmpeg debugging**: Added detailed logging for FFmpeg output

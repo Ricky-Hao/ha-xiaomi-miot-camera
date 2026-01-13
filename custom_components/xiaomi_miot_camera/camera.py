@@ -1,16 +1,9 @@
 # Copyright (C) 2025 Xiaomi Corporation
 # This software may be used and distributed according to the terms of the Xiaomi Miloco License Agreement.
-"""Camera platform for Xiaomi MIoT Camera integration.
-
-This integration uses direct WebRTC streaming from the Add-on:
-- Add-on provides WebRTC streams via WHEP at http://<host>:8889/camera/{did}/{channel}/whep
-- Integration handles WebRTC signaling directly
-- No HA go2rtc dependency - direct low-latency WebRTC
-"""
+"""Camera platform for Xiaomi MIoT Camera integration."""
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
 
 import aiohttp
 from aiohttp import web
@@ -26,7 +19,7 @@ from homeassistant.components.camera.webrtc import (
     WebRTCSendMessage,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -66,7 +59,7 @@ async def async_setup_entry(
             )
 
     async_add_entities(entities)
-    _LOGGER.info("Added %d camera entities", len(entities))
+    _LOGGER.debug("Added %d camera entities", len(entities))
 
 
 class XiaomiMiotCamera(CoordinatorEntity, Camera):
@@ -135,7 +128,6 @@ class XiaomiMiotCamera(CoordinatorEntity, Camera):
         """
         # Ensure camera stream is started
         if not self._camera_data.is_streaming:
-            _LOGGER.info("Starting camera %s for WebRTC stream", self._did)
             try:
                 await self._coordinator.async_start_camera(self._did)
             except Exception as err:
@@ -154,7 +146,6 @@ class XiaomiMiotCamera(CoordinatorEntity, Camera):
                 ) as resp:
                     if resp.status == 201:
                         answer_sdp = await resp.text()
-                        _LOGGER.debug("WebRTC answer received for camera %s", self._did)
                         send_message(WebRTCAnswer(answer_sdp))
                     else:
                         error_text = await resp.text()
@@ -212,19 +203,7 @@ class XiaomiMiotCamera(CoordinatorEntity, Camera):
     ) -> bytes | None:
         """Return a still image from the camera."""
         try:
-            frame = await self._coordinator.async_get_frame(self._did, self._channel)
-            if frame:
-                _LOGGER.debug(
-                    "Got frame for camera %s channel %d: %d bytes",
-                    self._did, self._channel, len(frame)
-                )
-                return frame
-            else:
-                _LOGGER.debug(
-                    "No frame available for camera %s channel %d",
-                    self._did, self._channel
-                )
-                return None
+            return await self._coordinator.async_get_frame(self._did, self._channel)
         except Exception as err:
             _LOGGER.error("Error getting frame for camera %s: %s", self._did, err)
             return None
@@ -250,7 +229,6 @@ class XiaomiMiotCamera(CoordinatorEntity, Camera):
 
     async def async_turn_on(self) -> None:
         """Turn on camera (start streaming)."""
-        _LOGGER.debug("Turn on requested for camera %s", self._did)
         try:
             await self._coordinator.async_start_camera(self._did)
         except Exception as err:
@@ -258,7 +236,6 @@ class XiaomiMiotCamera(CoordinatorEntity, Camera):
 
     async def async_turn_off(self) -> None:
         """Turn off camera (stop streaming)."""
-        _LOGGER.debug("Turn off requested for camera %s", self._did)
         try:
             await self._coordinator.async_stop_camera(self._did)
         except Exception as err:

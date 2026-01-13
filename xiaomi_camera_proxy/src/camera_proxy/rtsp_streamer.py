@@ -204,22 +204,14 @@ class RTSPStreamer:
     """Push H.264/H.265 streams to MediaMTX RTSP server."""
 
     def __init__(self, transcode_h264: bool = True):
-        """Initialize RTSP streamer.
-        
-        Args:
-            transcode_h264: If True, transcode H.265 to H.264 for better browser compatibility.
-                           This enables WebRTC in all browsers but uses more CPU.
-        """
+        """Initialize RTSP streamer."""
         self._streamers: Dict[str, subprocess.Popen] = {}
         self._writers: Dict[str, FFmpegWriter] = {}
         self._detected_codecs: Dict[str, int] = {}
         self._frame_counts: Dict[str, int] = {}
         self._prepared_streams: set = set()
         self._transcode_h264 = transcode_h264
-        self._frame_buffers: Dict[str, FrameBuffer] = {}  # Cache keyframes
-        
-        if transcode_h264:
-            _LOGGER.info("H.265→H.264 transcoding enabled for better WebRTC compatibility")
+        self._frame_buffers: Dict[str, FrameBuffer] = {}
 
     def _is_stream_running(self, stream_key: str) -> bool:
         """Check if FFmpeg process is still running."""
@@ -232,85 +224,62 @@ class RTSPStreamer:
         stream_key = f"{did}_{channel}"
         self._prepared_streams.add(stream_key)
         self._frame_counts[stream_key] = 0
-        self._frame_buffers[stream_key] = FrameBuffer(max_frames=90)  # ~3 seconds at 30fps
-        _LOGGER.info("Prepared RTSP stream for %s", stream_key)
+        self._frame_buffers[stream_key] = FrameBuffer(max_frames=90)
         return True
 
     def _start_ffmpeg_sync(self, stream_key: str, codec_id: int, initial_frames: List[bytes]) -> bool:
-        """Start FFmpeg process (sync, called from push_frame).
-        
-        Args:
-            stream_key: Stream identifier (did_channel)
-            codec_id: 4 for H.264, 5 for H.265
-            initial_frames: List of frames to send, should start with keyframe
-        """
+        """Start FFmpeg process."""
         try:
             did, channel = stream_key.rsplit("_", 1)
             rtsp_url = f"rtsp://localhost:8554/camera/{did}/{channel}"
             input_format = "hevc" if codec_id == 5 else "h264"
             
-            # Determine if we need to transcode
-            need_transcode = self._transcode_h264 and codec_id == 5  # H.265
+            need_transcode = self._transcode_h264 and codec_id == 5
             
-            # FFmpeg settings depend on whether we're transcoding or passing through
-            # For passthrough: minimal probe size for low latency
-            # For transcoding: larger probe size to properly analyze HEVC stream
             if need_transcode:
-                # Transcoding needs more analysis time for HEVC
-                probesize = "5000000"    # 5MB - enough for complete IDR frame analysis
-                analyzeduration = "5000000"  # 5 seconds
+                probesize = "5000000"
+                analyzeduration = "5000000"
             else:
-                # Passthrough: minimal latency
-                probesize = "32768"      # 32KB
+                probesize = "32768"
                 analyzeduration = "0"
             
             cmd = [
                 "ffmpeg",
                 "-hide_banner",
-                "-loglevel", "info",  # More verbose to debug issues
-                # Input settings
+                "-loglevel", "warning",
                 "-probesize", probesize,
                 "-analyzeduration", analyzeduration,
                 "-fflags", "+genpts+discardcorrupt+igndts",
                 "-flags", "low_delay",
-                "-err_detect", "ignore_err",  # Ignore decode errors
-                "-r", "15",  # Assume 15fps input (will be corrected by timestamps)
+                "-err_detect", "ignore_err",
+                "-r", "15",
                 "-f", input_format,
                 "-i", "pipe:0",
             ]
             
             if need_transcode:
-                # Transcode H.265 to H.264 for browser WebRTC compatibility
-                # Use fast preset and tune for low latency
                 cmd.extend([
                     "-c:v", "libx264",
                     "-preset", "ultrafast",
                     "-tune", "zerolatency",
-                    "-profile:v", "baseline",  # Most compatible
+                    "-profile:v", "baseline",
                     "-level", "3.1",
-                    "-b:v", "2M",  # 2 Mbps bitrate
+                    "-b:v", "2M",
                     "-maxrate", "2.5M",
-                    "-bufsize", "4M",  # Larger buffer for encoding
-                    "-g", "30",  # Keyframe every 30 frames
+                    "-bufsize", "4M",
+                    "-g", "30",
                     "-keyint_min", "15",
-                    "-r", "15",  # Output 15fps
+                    "-r", "15",
                 ])
-                output_codec = "H.264 (transcoded)"
             else:
-                # Copy codec (H.264 or H.265 passthrough)
                 cmd.extend(["-c:v", "copy"])
-                output_codec = "H.265" if codec_id == 5 else "H.264"
             
-            # Output settings - RTSP to MediaMTX
             cmd.extend([
                 "-f", "rtsp",
                 "-rtsp_transport", "tcp",
-                "-timeout", "30000000",  # 30 second timeout (in microseconds)
+                "-timeout", "30000000",
                 rtsp_url
             ])
-            
-            _LOGGER.info("Starting FFmpeg [%s]: %s -> %s (%s)", 
-                        stream_key, input_format, rtsp_url, output_codec)
             
             process = subprocess.Popen(
                 cmd,
@@ -322,19 +291,15 @@ class RTSPStreamer:
             
             self._streamers[stream_key] = process
             
-            # Write initial frames (keyframe + following frames)
             if process.stdin and initial_frames:
-                _LOGGER.info("Sending %d initial frames to FFmpeg [%s]", len(initial_frames), stream_key)
                 for frame in initial_frames:
                     process.stdin.write(frame)
                 process.stdin.flush()
             
-            # Start dedicated writer thread
             writer = FFmpegWriter(stream_key, process)
             writer.start()
             self._writers[stream_key] = writer
             
-            # Start error monitor in background
             asyncio.get_event_loop().create_task(
                 self._error_monitor(stream_key, process)
             )
@@ -353,21 +318,11 @@ class RTSPStreamer:
                 line = await loop.run_in_executor(None, process.stderr.readline)
                 if line:
                     line_str = line.decode().strip()
-                    if line_str:
-                        # Log all FFmpeg output for debugging
-                        if "error" in line_str.lower():
-                            _LOGGER.error("FFmpeg [%s]: %s", stream_key, line_str)
-                        elif "warning" in line_str.lower():
-                            _LOGGER.warning("FFmpeg [%s]: %s", stream_key, line_str)
-                        elif line_str.startswith("frame=") or line_str.startswith("size="):
-                            # Progress info - log at debug
-                            _LOGGER.debug("FFmpeg [%s]: %s", stream_key, line_str)
-                        else:
-                            _LOGGER.info("FFmpeg [%s]: %s", stream_key, line_str)
-        except Exception as e:
-            _LOGGER.debug("FFmpeg monitor error [%s]: %s", stream_key, e)
+                    if line_str and "error" in line_str.lower():
+                        _LOGGER.error("FFmpeg [%s]: %s", stream_key, line_str)
+        except Exception:
+            pass
         
-        # FFmpeg exited
         exit_code = process.poll()
         if exit_code and exit_code != 0:
             _LOGGER.warning("FFmpeg [%s] exited with code %d", stream_key, exit_code)
@@ -376,13 +331,11 @@ class RTSPStreamer:
         """Stop RTSP stream for a camera."""
         stream_key = f"{did}_{channel}"
         
-        # Stop writer thread
         if stream_key in self._writers:
             self._writers[stream_key].stop()
             self._writers[stream_key].join(timeout=2)
             del self._writers[stream_key]
         
-        # Kill FFmpeg
         if stream_key in self._streamers:
             process = self._streamers[stream_key]
             if process.stdin:
@@ -401,12 +354,9 @@ class RTSPStreamer:
         self._detected_codecs.pop(stream_key, None)
         self._frame_counts.pop(stream_key, None)
         
-        # Clear frame buffer
         if stream_key in self._frame_buffers:
             self._frame_buffers[stream_key].clear()
             del self._frame_buffers[stream_key]
-        
-        _LOGGER.info("Stopped RTSP stream: %s", stream_key)
 
     async def push_frame(self, did: str, frame_data: bytes, channel: int = 0):
         """Push H.264/H.265 frame to stream."""
@@ -415,7 +365,6 @@ class RTSPStreamer:
         if stream_key not in self._prepared_streams:
             return
         
-        # Get or create frame buffer
         if stream_key not in self._frame_buffers:
             self._frame_buffers[stream_key] = FrameBuffer(max_frames=90)
         frame_buffer = self._frame_buffers[stream_key]
@@ -426,26 +375,18 @@ class RTSPStreamer:
             if detected == 0:
                 detected = 5
             self._detected_codecs[stream_key] = detected
-            
-            codec_name = "H.265" if detected == 5 else "H.264"
-            _LOGGER.info("Detected %s for %s (frame size=%d)", codec_name, stream_key, len(frame_data))
         
         codec_id = self._detected_codecs.get(stream_key, 5)
         is_key = is_keyframe(frame_data, codec_id)
         
-        # Always add to buffer (for FFmpeg restart)
         frame_buffer.add_frame(frame_data, is_key)
         
         # FFmpeg not started yet? Wait for keyframe
         if stream_key not in self._streamers:
             if not frame_buffer.has_keyframe():
-                # Still waiting for first keyframe
                 return
             
-            # Have keyframe, start FFmpeg with buffered frames
             initial_frames = frame_buffer.get_frames()
-            _LOGGER.info("Got keyframe for %s, starting FFmpeg with %d buffered frames", 
-                        stream_key, len(initial_frames))
             self._start_ffmpeg_sync(stream_key, codec_id, initial_frames)
             self._frame_counts[stream_key] = len(initial_frames)
             return
@@ -453,21 +394,16 @@ class RTSPStreamer:
         # FFmpeg crashed? Wait for next keyframe to restart
         if not self._is_stream_running(stream_key):
             if not is_key:
-                # Wait for keyframe before restarting
                 return
             
-            _LOGGER.warning("FFmpeg [%s] not running, restarting with keyframe", stream_key)
-            # Clean up old writer
             if stream_key in self._writers:
                 self._writers[stream_key].stop()
                 del self._writers[stream_key]
             
-            # Restart with buffered frames starting from this keyframe
             initial_frames = frame_buffer.get_frames()
             self._start_ffmpeg_sync(stream_key, codec_id, initial_frames)
             return
         
-        # Normal frame: push to writer thread
         writer = self._writers.get(stream_key)
         if writer:
             writer.push_frame(frame_data)
